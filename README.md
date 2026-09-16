@@ -12,15 +12,6 @@ Proyek ini berdiri sendiri dari backend (`kejarbill-api`). Seluruh kontrak API b
 - [Cara Menjalankan](#cara-menjalankan)
 - [Konfigurasi](#konfigurasi)
 - [Struktur Proyek](#struktur-proyek)
-- [Referensi API (Backend `kejarbill-api`)](#referensi-api-backend-kejarbill-api)
-  - [Konvensi Umum](#konvensi-umum)
-  - [1. Auth](#1-auth)
-  - [2. Users](#2-users)
-  - [3. Groups](#3-groups)
-  - [4. Expenses](#4-expenses)
-  - [5. Settlement](#5-settlement)
-  - [6. Payment Methods](#6-payment-methods)
-- [Enums & Nilai Tetap](#enums--nilai-tetap)
 
 ---
 
