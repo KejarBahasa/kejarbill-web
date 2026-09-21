@@ -76,7 +76,7 @@
 			</div>
 			<div class="row">
 				<dt>Tanggal bayar</dt>
-				<dd>{new Date(settlement.paid_at).toLocaleDateString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</dd>
+				<dd>{new Date(settlement.paid_at).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</dd>
 			</div>
 			{#if settlement.payment_method}
 				<div class="row">
@@ -147,6 +147,7 @@
 		max-width: 560px;
 		background: var(--surface);
 		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 		box-shadow: var(--shadow);
 		padding: 20px;

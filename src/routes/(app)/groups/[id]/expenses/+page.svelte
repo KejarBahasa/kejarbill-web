@@ -16,7 +16,7 @@
 			loading = true;
 			error = '';
 			try {
-				expenses = await getGroupExpenses(id);
+				expenses = (await getGroupExpenses(id)).expenses;
 			} catch (err) {
 				expenses = [];
 				error = err instanceof ApiError ? err.message : 'Gagal memuat expense.';
@@ -120,7 +120,8 @@
 		gap: 14px;
 		padding: 14px 16px;
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 	}
 

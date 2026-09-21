@@ -28,7 +28,7 @@
 		error = '';
 		try {
 			const [s, p] = await Promise.all([getGroupSettlements(id), getGroupParticipants(id)]);
-			settlements = s;
+			settlements = s.settlements;
 			participants = p.participants;
 			if (participants.length >= 2) {
 				from_participant_id = participants[0].id;
@@ -178,7 +178,8 @@
 
 	.block {
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 		padding: 20px;
 	}
@@ -221,7 +222,7 @@
 		align-items: center;
 		gap: 12px;
 		padding-bottom: 10px;
-		border-bottom: 1px solid var(--border);
+		border-bottom: 2px solid #000;
 	}
 
 	.list li:last-child {
@@ -308,7 +309,7 @@
 		gap: 6px;
 		padding: 4px;
 		background: var(--surface-2);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
 		border-radius: var(--radius-sm);
 	}
 

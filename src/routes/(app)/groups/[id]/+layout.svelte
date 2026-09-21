@@ -99,7 +99,7 @@
 	.tabs {
 		display: flex;
 		gap: 4px;
-		border-bottom: 1px solid var(--border);
+		border-bottom: 2px solid #000;
 		margin-bottom: 24px;
 	}
 

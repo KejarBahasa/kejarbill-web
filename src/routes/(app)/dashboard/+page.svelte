@@ -115,7 +115,8 @@
 		gap: 14px;
 		padding: 20px;
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 		color: var(--text);
 		text-decoration: none;
@@ -123,7 +124,7 @@
 	}
 
 	.card:hover {
-		border-color: var(--border-strong);
+		border-color: #000;
 		text-decoration: none;
 		transform: translateY(-1px);
 	}

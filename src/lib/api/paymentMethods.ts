@@ -6,7 +6,7 @@ import type {
 } from '../types/paymentMethod';
 
 export function createPaymentMethod(body: CreatePaymentMethodRequest) {
-	return api<{ id: string }>('/v1/payment-methods', { method: 'POST', body }, true);
+	return api<{ payment_method_id: string }>('/v1/payment-methods', { method: 'POST', body }, true);
 }
 
 export function getPaymentMethods() {

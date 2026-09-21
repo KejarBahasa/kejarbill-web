@@ -1,5 +1,3 @@
-import type { ApiResponse } from './index';
-
 export interface Participant {
 	id: string;
 	user_id: string | null;
@@ -21,7 +19,6 @@ export interface GroupDetail extends CreateGroupRequest {
 }
 
 export type ActivityType = 'expense' | 'settlement';
-
 export interface GroupActivity {
 	type: ActivityType;
 	created_at: string;
@@ -71,10 +68,10 @@ export interface GroupList {
 	groups: GroupDetail[];
 }
 
+export interface ActivityList {
+	activities: GroupActivity[];
+}
+
 export interface ParticipantList {
 	participants: Participant[];
 }
-
-export type ApiGroupDetail = ApiResponse<GroupDetail>;
-export type ApiGroupActivities = ApiResponse<GroupActivity[]>;
-export type ApiGroupBalances = ApiResponse<Balance[]>;

@@ -88,7 +88,8 @@
 		max-width: 560px;
 		padding: 24px;
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 	}
 
@@ -101,7 +102,7 @@
 		justify-content: space-between;
 		gap: 16px;
 		padding: 13px 0;
-		border-bottom: 1px solid var(--border);
+		border-bottom: 2px solid #000;
 	}
 
 	.row:last-child {

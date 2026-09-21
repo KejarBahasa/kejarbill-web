@@ -4,7 +4,7 @@ import type {
 	CreateEqualExpenseRequest,
 	CreateItemizedExpenseRequest,
 	ExpenseDetail,
-	ExpenseSummary
+	ExpenseList
 } from '../types/expense';
 
 export function createEqualExpense(body: CreateEqualExpenseRequest) {
@@ -20,7 +20,7 @@ export function createItemizedExpense(body: CreateItemizedExpenseRequest) {
 }
 
 export function getGroupExpenses(groupId: string) {
-	return api<ExpenseSummary[]>(`/v1/groups/${groupId}/expenses`, {}, true);
+	return api<ExpenseList>(`/v1/groups/${groupId}/expenses`, {}, true);
 }
 
 export function getExpense(expenseId: string) {
