@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/Icon.svelte';
 	import { createPaymentMethod } from '$lib/api/paymentMethods';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { MethodType, Visibility } from '$lib/types/paymentMethod';
 	import { goto } from '$app/navigation';
@@ -35,7 +35,7 @@
 			toast.success('Metode pembayaran disimpan.');
 			await goto('/payments');
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Terjadi kesalahan. Coba lagi.';
+			error = mapApiError(err, 'Terjadi kesalahan. Coba lagi.');
 		} finally {
 			loading = false;
 		}
