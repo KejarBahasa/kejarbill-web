@@ -13,6 +13,15 @@ export function getPaymentMethods() {
 	return api<PaymentMethodList>('/v1/payment-methods', {}, true);
 }
 
+/** Metode pembayaran participant penerima yang terlihat sesuai visibility grup (utk settlement non-cash). */
+export function getRecipientPaymentMethods(groupId: string, participantId: string) {
+	return api<PaymentMethodList>(
+		`/v1/groups/${groupId}/participants/${participantId}/payment-methods`,
+		{},
+		true
+	);
+}
+
 export function updatePaymentMethod(id: string, body: UpdatePaymentMethodRequest) {
 	return api<null>(`/v1/payment-methods/${id}`, { method: 'PATCH', body }, true);
 }
