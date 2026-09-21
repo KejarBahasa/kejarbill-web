@@ -2,7 +2,8 @@
 	import { page } from '$app/state';
 	import Icon from '$lib/components/Icon.svelte';
 	import { getSettlement } from '$lib/api/settlements';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
+	import { formatIDR, formatDateTime } from '$lib/utils/format';
 	import type { SettlementDetail } from '$lib/types/settlement';
 
 	const settlementId = String(page.params.settlementId);
@@ -19,21 +20,24 @@
 				settlement = await getSettlement(settlementId);
 			} catch (err) {
 				settlement = null;
-				error = err instanceof ApiError ? err.message : 'Gagal memuat settlement.';
+				error = mapApiError(err, 'Gagal memuat settlement.');
 			} finally {
 				loading = false;
 			}
 		})();
 	});
 
-	function formatIDR(n: number) {
-		return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
-	}
 
 	const channelLabel: Record<string, string> = {
 		cash: 'Tunai',
 		bank_transfer: 'Transfer Bank',
 		ewallet: 'E-Wallet'
+	};
+
+	const statusLabel: Record<string, string> = {
+		completed: 'LUNAS',
+		pending: 'PENDING',
+		cancelled: 'DIBATALKAN'
 	};
 </script>
 
@@ -50,8 +54,8 @@
 {:else if settlement}
 	<div class="head">
 		<h1>Detail Settlement</h1>
-		<span class="badge" class:pending={settlement.status === 'pending'}>
-			{settlement.status === 'settled' ? 'LUNAS' : 'PENDING'}
+		<span class="badge" class:pending={settlement.status === 'pending'} class:cancelled={settlement.status === 'cancelled'}>
+			{statusLabel[settlement.status] ?? settlement.status.toUpperCase()}
 		</span>
 	</div>
 
@@ -76,7 +80,7 @@
 			</div>
 			<div class="row">
 				<dt>Tanggal bayar</dt>
-				<dd>{new Date(settlement.paid_at).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</dd>
+				<dd>{formatDateTime(settlement.paid_at)}</dd>
 			</div>
 			{#if settlement.payment_method}
 				<div class="row">
@@ -141,6 +145,10 @@
 
 	.badge.pending {
 		background: var(--accent);
+	}
+
+	.badge.cancelled {
+		background: var(--danger);
 	}
 
 	.block {

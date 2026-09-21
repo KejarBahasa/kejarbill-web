@@ -3,7 +3,8 @@
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/Icon.svelte';
 	import { getExpense, deleteExpense } from '$lib/api/expenses';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
+	import { formatIDR, formatDate } from '$lib/utils/format';
 	import type { ExpenseDetail } from '$lib/types/expense';
 	import { toast } from '$lib/stores/toast.svelte';
 
@@ -22,16 +23,13 @@
 				expense = await getExpense(expenseId);
 			} catch (err) {
 				expense = null;
-				error = err instanceof ApiError ? err.message : 'Gagal memuat expense.';
+				error = mapApiError(err, 'Gagal memuat expense.');
 			} finally {
 				loading = false;
 			}
 		})();
 	});
 
-	function formatIDR(n: number) {
-		return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
-	}
 
 	async function handleDelete() {
 		if (!expense) return;
@@ -42,7 +40,7 @@
 			toast.success('Expense dihapus.');
 			await goto(`/groups/${page.params.id}/expenses`);
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Gagal menghapus expense.';
+			error = mapApiError(err, 'Gagal menghapus expense.');
 		} finally {
 			deleting = false;
 		}
@@ -69,7 +67,7 @@
 
 	<div class="meta">
 		<span class="chip"><Icon name="user" size={13} /> {expense.payer.display_name}</span>
-		<span class="chip"><Icon name="calendar" size={13} /> {new Date(expense.expense_date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</span>
+		<span class="chip"><Icon name="calendar" size={13} /> {formatDate(expense.expense_date)}</span>
 		<strong class="total">{formatIDR(expense.total_amount)}</strong>
 	</div>
 

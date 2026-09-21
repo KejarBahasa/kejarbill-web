@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import Icon from '$lib/components/Icon.svelte';
-	import { getGroupParticipants, addMember, addGuests } from '$lib/api/groups';
-	import { searchUsers } from '$lib/api/users';
-	import { ApiError } from '$lib/types';
+	import UserSearchPicker from '$lib/components/UserSearchPicker.svelte';
+	import { getGroupParticipants, addMembersBulk, addGuests, claimGuest } from '$lib/api/groups';
+	import { mapApiError } from '$lib/utils/errors';
 	import { toast } from '$lib/stores/toast.svelte';
-	import type { Participant } from '$lib/types/group';
+	import type { Participant, GroupRole } from '$lib/types/group';
 	import type { PublicUser } from '$lib/types/user';
 
 	const id = String(page.params.id);
@@ -13,25 +13,24 @@
 	let participants = $state<Participant[]>([]);
 	let loading = $state(true);
 	let error = $state('');
-
-	let query = $state('');
-	let results = $state<PublicUser[]>([]);
-	let searching = $state(false);
-	let notFound = $state(false);
-	let addingUserId = $state('');
+	let addingMembers = $state(false);
+	let addingGuests = $state(false);
+	let claimFor = $state('');
+	let claiming = $state(false);
 	let guestsInput = $state('');
-	let submitting = $state(false);
 
-	let timer: ReturnType<typeof setTimeout>;
+	const roleLabels: Record<GroupRole, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' };
+
+	const self = $derived(participants.find((p) => p.is_self));
+	const canManage = $derived(self?.role === 'owner' || self?.role === 'admin');
 
 	async function load() {
 		loading = true;
-		error = '';
 		try {
 			participants = (await getGroupParticipants(id)).participants;
 		} catch (err) {
 			participants = [];
-			error = err instanceof ApiError ? err.message : 'Gagal memuat anggota.';
+			error = mapApiError(err, 'Gagal memuat anggota.');
 		} finally {
 			loading = false;
 		}
@@ -39,44 +38,19 @@
 
 	$effect(() => {
 		void load();
-		return () => clearTimeout(timer);
 	});
 
-	function onQueryInput() {
-		clearTimeout(timer);
-		results = [];
-		notFound = false;
-		const q = query.trim();
-		if (q.length < 2) return;
-		timer = setTimeout(async () => {
-			searching = true;
-			try {
-				const data = await searchUsers(q);
-				results = data.users;
-				notFound = data.users.length === 0;
-			} catch {
-				results = [];
-			} finally {
-				searching = false;
-			}
-		}, 300);
-	}
-
-	const memberUserIds = $derived(new Set(participants.map((p) => p.user_id).filter(Boolean)));
-
-	async function pick(u: PublicUser) {
-		addingUserId = u.id;
+	async function handleAddMembers(users: PublicUser[]) {
+		error = '';
+		addingMembers = true;
 		try {
-			await addMember(id, { user_id: u.id });
-			query = '';
-			results = [];
-			notFound = false;
-			toast.success(`${u.name} ditambahkan sebagai member.`);
+			await addMembersBulk(id, { user_ids: users.map((u) => u.id) });
+			toast.success(`${users.length} member berhasil ditambahkan.`);
 			await load();
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Gagal menambah member.';
+			error = mapApiError(err, 'Gagal menambah member.');
 		} finally {
-			addingUserId = '';
+			addingMembers = false;
 		}
 	}
 
@@ -84,16 +58,31 @@
 		error = '';
 		const names = guestsInput.split(',').map((n) => n.trim()).filter(Boolean);
 		if (names.length < 1) return (error = 'Masukkan minimal satu nama tamu.');
-		submitting = true;
+		addingGuests = true;
 		try {
 			await addGuests(id, { guests: names.map((display_name) => ({ display_name })) });
 			guestsInput = '';
 			toast.success(`${names.length} tamu berhasil ditambahkan.`);
 			await load();
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Gagal menambah tamu.';
+			error = mapApiError(err, 'Gagal menambah tamu.');
 		} finally {
-			submitting = false;
+			addingGuests = false;
+		}
+	}
+
+	async function handleClaim(user: PublicUser[]) {
+		error = '';
+		claiming = true;
+		try {
+			await claimGuest(id, claimFor, { user_id: user[0].id });
+			toast.success('Tamu berhasil di-claim.');
+			claimFor = '';
+			await load();
+		} catch (err) {
+			error = mapApiError(err, 'Gagal claim tamu.');
+		} finally {
+			claiming = false;
 		}
 	}
 </script>
@@ -114,15 +103,36 @@
 		{:else if participants.length === 0}
 			<p class="muted">Belum ada peserta.</p>
 		{:else}
-			<ul class="list">
+			<ul class="plist">
 				{#each participants as p (p.id)}
-					<li>
+					<li class="prow">
 						<span class="avatar">{p.display_name.slice(0, 1).toUpperCase()}</span>
 						<div class="p-body">
 							<strong>{p.display_name}</strong>
-							<span class="p-tag">{p.participant_type === 'member' ? 'Member' : 'Tamu'}</span>
+							{#if p.participant_type === 'guest'}
+								<span class="tag">Tamu</span>
+							{:else if p.role}
+								<span class="tag {p.role}">{roleLabels[p.role]}</span>
+							{/if}
+							{#if p.is_self}
+								<span class="tag self">Kamu</span>
+							{/if}
 						</div>
+						{#if canManage && p.participant_type === 'guest'}
+							<button
+								class="btn-claim"
+								onclick={() => (claimFor = claimFor === p.id ? '' : p.id)}
+							>
+								Jadikan Member
+							</button>
+						{/if}
 					</li>
+					{#if claimFor === p.id}
+						<div class="claim-box">
+							<p class="muted">Klaim <strong>{p.display_name}</strong> sebagai user terdaftar:</p>
+							<UserSearchPicker busy={claiming} onPick={handleClaim} />
+						</div>
+					{/if}
 				{/each}
 			</ul>
 		{/if}
@@ -131,46 +141,10 @@
 	<div class="stack">
 		<section class="block">
 			<h2 class="block-title">Tambah Member</h2>
-			<div class="input-wrap">
-				<span class="input-icon"><Icon name="user" size={16} /></span>
-				<input
-					class="input input-with-icon"
-					type="text"
-					placeholder="Cari nama atau username..."
-					bind:value={query}
-					oninput={onQueryInput}
-				/>
-			</div>
-
-			{#if searching}
-				<div class="status"><span class="spinner"></span> Mencari…</div>
-			{:else if notFound}
-				<p class="hint muted">User tidak ditemukan.</p>
-			{:else if results.length > 0}
-				<ul class="results">
-					{#each results as u (u.id)}
-						<li>
-							<span class="avatar sm">{u.name.slice(0, 1).toUpperCase()}</span>
-							<span class="u-body">
-								<strong>{u.name}</strong>
-								<span class="u-sub">@{u.username}</span>
-							</span>
-							<button
-								class="btn btn-primary btn-mini"
-								onclick={() => pick(u)}
-								disabled={addingUserId === u.id || memberUserIds.has(u.id)}
-							>
-								{#if memberUserIds.has(u.id)}
-									Sudah
-								{:else}
-									<Icon name="plus" size={14} />
-								{/if}
-							</button>
-						</li>
-					{/each}
-				</ul>
+			{#if canManage}
+				<UserSearchPicker multiple busy={addingMembers} addLabel="Tambah Member" onPick={handleAddMembers} />
 			{:else}
-				<p class="hint muted">Ketik minimal 2 karakter untuk mencari user terdaftar.</p>
+				<p class="hint muted">Hanya owner/admin yang bisa menambah member.</p>
 			{/if}
 		</section>
 
@@ -178,7 +152,7 @@
 			<h2 class="block-title">Tambah Tamu</h2>
 			<input class="input" type="text" placeholder="cth: Dewi, Rina" bind:value={guestsInput} />
 			<p class="hint muted">Pisahkan beberapa nama dengan koma.</p>
-			<button class="btn btn-primary full" onclick={handleAddGuests} disabled={submitting}>
+			<button class="btn btn-primary" onclick={handleAddGuests} disabled={addingGuests}>
 				Tambah Tamu
 			</button>
 		</section>
@@ -202,7 +176,6 @@
 	.block {
 		background: var(--surface);
 		border: 3px solid #000;
-		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 		box-shadow: var(--shadow);
 		padding: 20px;
@@ -234,7 +207,7 @@
 		font-size: 14px;
 	}
 
-	.list {
+	.plist {
 		list-style: none;
 		margin: 0;
 		padding: 0;
@@ -243,7 +216,7 @@
 		gap: 12px;
 	}
 
-	.list li {
+	.prow {
 		display: flex;
 		align-items: center;
 		gap: 12px;
@@ -263,23 +236,18 @@
 		font-weight: 700;
 	}
 
-	.avatar.sm {
-		width: 32px;
-		height: 32px;
-		font-size: 14px;
-	}
-
 	.p-body {
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		flex-wrap: wrap;
 	}
 
 	.p-body strong {
 		font-size: 14.5px;
 	}
 
-	.p-tag {
+	.tag {
 		font-size: 11px;
 		font-weight: 700;
 		padding: 2px 8px;
@@ -289,52 +257,45 @@
 		color: var(--text-2);
 	}
 
-	.input-icon {
-		left: 12px;
+	.tag.owner {
+		background: var(--danger);
+		color: #fff;
 	}
 
-	.results {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
+	.tag.admin {
+		background: var(--accent);
+		color: #000;
 	}
 
-	.results li {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px;
-		border: 2px solid var(--surface-2);
-		border-radius: var(--radius-sm);
+	.tag.self {
+		background: var(--success);
+		color: #000;
 	}
 
-	.u-body {
-		flex: 1;
-		min-width: 0;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.u-body strong {
-		font-size: 14px;
-	}
-
-	.u-sub {
-		font-size: 12.5px;
-		color: var(--muted);
-	}
-
-	.btn-mini {
-		width: auto;
+	.btn-claim {
+		margin-left: auto;
 		padding: 6px 10px;
-		font-size: 13px;
+		background: var(--surface);
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		font-size: 12.5px;
+		font-weight: 700;
+		box-shadow: 3px 3px 0 0 #000;
+		transition: transform 0.12s ease, box-shadow 0.12s ease;
 	}
 
-	.full {
-		width: 100%;
+	.btn-claim:hover {
+		transform: translate(1px, 1px);
+		box-shadow: 2px 2px 0 0 #000;
+	}
+
+	.claim-box {
+		padding: 12px;
+		border: 2px dashed #000;
+		border-radius: var(--radius-sm);
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
 	}
 
 	@media (max-width: 720px) {

@@ -3,41 +3,71 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupParticipants } from '$lib/api/groups';
 	import { getGroupSettlements, createSettlement } from '$lib/api/settlements';
-	import { ApiError } from '$lib/types';
+	import { getRecipientPaymentMethods } from '$lib/api/paymentMethods';
 	import { toast } from '$lib/stores/toast.svelte';
+	import { mapApiError } from '$lib/utils/errors';
+	import { formatIDR, formatDateShort } from '$lib/utils/format';
 	import type { Participant } from '$lib/types/group';
 	import type { SettlementSummary, PaymentChannel } from '$lib/types/settlement';
+	import type { PaymentMethodSummary } from '$lib/types/paymentMethod';
 
 	const id = String(page.params.id);
 
 	let settlements = $state<SettlementSummary[]>([]);
 	let participants = $state<Participant[]>([]);
+	let recipientMethods = $state<PaymentMethodSummary[]>([]);
 	let loading = $state(true);
+	let loadingMore = $state(false);
+	let loadingMethods = $state(false);
+	let listError = $state('');
 	let error = $state('');
+	let pageNum = $state(1);
+	let totalPages = $state(1);
+	let totalItems = $state(0);
 
 	let from_participant_id = $state('');
 	let to_participant_id = $state('');
-	let payment_channel = $state<PaymentChannel>('bank_transfer');
+	let payment_channel = $state<PaymentChannel>('cash');
+	let payment_method_id = $state('');
 	let amount = $state(0);
 	let notes = $state('');
 	let paid_at = $state(new Date().toISOString().slice(0, 10));
 	let submitting = $state(false);
+	let idemKey = $state(crypto.randomUUID());
+
+	const methodOptions = $derived(
+		payment_channel === 'cash'
+			? []
+			: recipientMethods.filter(
+					(m) => m.method_type === (payment_channel === 'bank_transfer' ? 'bank' : 'ewallet')
+				)
+	);
+
+	const hasMore = $derived(settlements.length < totalItems);
 
 	async function load() {
 		loading = true;
-		error = '';
+		listError = '';
+		pageNum = 1;
 		try {
-			const [s, p] = await Promise.all([getGroupSettlements(id), getGroupParticipants(id)]);
-			settlements = s.settlements;
+			const [s, p] = await Promise.all([getGroupSettlements(id, 1), getGroupParticipants(id)]);
+			settlements = s.data.settlements;
+			totalItems = s.meta?.pagination?.total_items ?? s.data.settlements.length;
+			totalPages = s.meta?.pagination?.total_pages ?? 1;
 			participants = p.participants;
-			if (participants.length >= 2) {
+			const me = participants.find((x) => x.is_self);
+			const other = participants.find((x) => !x.is_self);
+			if (me && other) {
+				from_participant_id = me.id;
+				to_participant_id = other.id;
+			} else if (participants.length >= 2) {
 				from_participant_id = participants[0].id;
 				to_participant_id = participants[1].id;
 			}
 		} catch (err) {
 			settlements = [];
 			participants = [];
-			error = err instanceof ApiError ? err.message : 'Gagal memuat data settlement.';
+			listError = mapApiError(err, 'Gagal memuat data settlement.');
 		} finally {
 			loading = false;
 		}
@@ -47,8 +77,36 @@
 		void load();
 	});
 
-	function formatIDR(n: number) {
-		return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
+	// muat metode pembayaran penerima saat channel non-cash atau penerima berubah
+	$effect(() => {
+		const recipient = to_participant_id;
+		if (payment_channel === 'cash' || !recipient) {
+			recipientMethods = [];
+			return;
+		}
+		loadingMethods = true;
+		payment_method_id = '';
+		getRecipientPaymentMethods(id, recipient)
+			.then((res) => (recipientMethods = res.payment_methods))
+			.catch(() => (recipientMethods = []))
+			.finally(() => (loadingMethods = false));
+	});
+
+	async function loadMore() {
+		loadingMore = true;
+		try {
+			const s = await getGroupSettlements(id, pageNum + 1);
+			pageNum += 1;
+			settlements = [...settlements, ...s.data.settlements];
+		} catch (err) {
+			listError = mapApiError(err, 'Gagal memuat data settlement.');
+		} finally {
+			loadingMore = false;
+		}
+	}
+
+	function pickChannel(c: PaymentChannel) {
+		payment_channel = c;
 	}
 
 	async function handleSubmit() {
@@ -56,20 +114,33 @@
 		if (!from_participant_id || !to_participant_id) return (error = 'Pilih pengirim dan penerima.');
 		if (from_participant_id === to_participant_id) return (error = 'Pengirim dan penerima tidak boleh sama.');
 		if (!amount || amount <= 0) return (error = 'Jumlah wajib lebih dari 0.');
+		if (payment_channel !== 'cash') {
+			if (!payment_method_id) return (error = 'Pilih metode pembayaran untuk transfer bank / e-wallet.');
+			if (!methodOptions.some((m) => m.id === payment_method_id)) {
+				payment_method_id = '';
+				return (error = 'Metode pembayaran tidak cocok dengan saluran yang dipilih.');
+			}
+		}
 		submitting = true;
 		try {
-			await createSettlement(id, {
-				from_participant_id,
-				to_participant_id,
-				payment_channel,
-				notes: notes.trim() || undefined,
-				paid_at: new Date(paid_at + 'T00:00:00Z').toISOString(),
-				amount
-			});
+			await createSettlement(
+				id,
+				{
+					from_participant_id,
+					to_participant_id,
+					payment_channel,
+					payment_method_id: payment_channel === 'cash' ? undefined : payment_method_id,
+					notes: notes.trim() || undefined,
+					paid_at: new Date(paid_at + 'T00:00:00Z').toISOString(),
+					amount
+				},
+				idemKey
+			);
+			idemKey = crypto.randomUUID();
 			toast.success('Settlement berhasil dicatat.');
 			await load();
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Gagal mencatat settlement.';
+			error = mapApiError(err, 'Gagal mencatat settlement.');
 		} finally {
 			submitting = false;
 		}
@@ -83,6 +154,9 @@
 <div class="cols">
 	<section class="block">
 		<h2 class="block-title">Riwayat Settlement</h2>
+		{#if listError}
+			<div class="alert alert-error" role="alert"><span>{listError}</span></div>
+		{/if}
 		{#if loading}
 			<div class="status"><span class="spinner"></span> Memuat…</div>
 		{:else if settlements.length === 0}
@@ -95,13 +169,21 @@
 							<span class="s-icon"><Icon name="arrow-right" size={16} /></span>
 							<span class="s-body">
 								<strong>{s.from_participant.display_name} → {s.to_participant.display_name}</strong>
-								<span class="s-sub">{new Date(s.settlement_date).toLocaleDateString('id-ID')}</span>
+								<span class="s-sub">{formatDateShort(s.settlement_date)}</span>
 							</span>
 							<strong class="s-amount">{formatIDR(s.amount)}</strong>
 						</a>
 					</li>
 				{/each}
 			</ul>
+			<div class="pager">
+				<span class="muted">{settlements.length} dari {totalItems}</span>
+				{#if hasMore}
+					<button class="btn btn-ghost btn-mini" onclick={loadMore} disabled={loadingMore}>
+						Muat lagi
+					</button>
+				{/if}
+			</div>
 		{/if}
 	</section>
 
@@ -147,10 +229,29 @@
 				<span class="field-label">Saluran bayar</span>
 				<div class="segmented">
 					{#each ([['cash', 'Tunai'], ['bank_transfer', 'Transfer'], ['ewallet', 'E-Wallet']]) as [c, label] (c)}
-						<button type="button" class:active={payment_channel === c} onclick={() => (payment_channel = c as PaymentChannel)}>{label}</button>
+						<button type="button" class:active={payment_channel === c} onclick={() => pickChannel(c as PaymentChannel)}>{label}</button>
 					{/each}
 				</div>
 			</fieldset>
+
+			{#if payment_channel !== 'cash'}
+				<label class="field">
+					<span class="field-label">Metode pembayaran penerima</span>
+					<select class="input" bind:value={payment_method_id} disabled={loadingMethods}>
+						<option value="" disabled>{loadingMethods ? 'Memuat…' : 'Pilih metode…'}</option>
+						{#each methodOptions as m (m.id)}
+							<option value={m.id}>{m.provider_name}{m.masked_account_number ? ` (${m.masked_account_number})` : ''}</option>
+						{/each}
+					</select>
+				</label>
+				{#if loadingMethods}
+					<p class="hint muted">Memuat metode pembayaran penerima…</p>
+				{:else if methodOptions.length === 0}
+					<p class="hint muted">
+						Penerima belum membagikan metode {payment_channel === 'bank_transfer' ? 'bank' : 'e-wallet'} yang terlihat untukmu.
+					</p>
+				{/if}
+			{/if}
 
 			<label class="field">
 				<span class="field-label">Catatan (opsional)</span>
@@ -328,6 +429,25 @@
 	.segmented button.active {
 		background: var(--accent);
 		color: #fff;
+	}
+
+	.pager {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-top: 14px;
+		font-size: 13px;
+	}
+
+	.btn-mini {
+		width: auto;
+		padding: 7px 12px;
+		font-size: 13px;
+	}
+
+	.hint {
+		font-size: 13px;
 	}
 
 	@media (max-width: 760px) {

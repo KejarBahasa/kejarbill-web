@@ -3,7 +3,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupParticipants } from '$lib/api/groups';
 	import { createEqualExpense, createCustomExpense, createItemizedExpense } from '$lib/api/expenses';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { Participant } from '$lib/types/group';
 	import { goto } from '$app/navigation';
@@ -40,7 +40,7 @@
 				}
 			} catch (err) {
 				participants = [];
-				error = err instanceof ApiError ? err.message : 'Gagal memuat peserta.';
+				error = mapApiError(err, 'Gagal memuat peserta.');
 			} finally {
 				loading = false;
 			}
@@ -93,6 +93,16 @@
 					loading = false;
 					return;
 				}
+				if (!total_amount || total_amount <= 0) {
+					error = 'Total wajib lebih dari 0.';
+					loading = false;
+					return;
+				}
+				if (total_amount % ids.length !== 0) {
+					error = `Total harus habis dibagi ${ids.length} peserta (Rp${total_amount.toLocaleString('id-ID')} tidak pas).`;
+					loading = false;
+					return;
+				}
 				await createEqualExpense({ ...common, participant_ids: ids, total_amount });
 			} else if (mode === 'custom') {
 				const shares = Object.entries(customShares)
@@ -118,7 +128,7 @@
 			toast.success('Expense disimpan.');
 			await goto(`/groups/${id}/expenses`);
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Gagal menyimpan expense.';
+			error = mapApiError(err, 'Gagal menyimpan expense.');
 		} finally {
 			loading = false;
 		}

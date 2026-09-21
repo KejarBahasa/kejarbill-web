@@ -1,5 +1,6 @@
 import { auth } from '../stores/auth.svelte';
 import { ApiError } from '../types';
+import type { Meta } from '../types';
 
 export const API_BASE_URL: string =
 	import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -33,11 +34,16 @@ async function refreshAccessToken(): Promise<string | null> {
 	}
 }
 
-export async function api<T>(
+export interface ApiResult<T> {
+	data: T;
+	meta?: Meta;
+}
+
+export async function apiRaw<T>(
 	path: string,
 	options: ApiOptions = {},
 	authenticated = false
-): Promise<T> {
+): Promise<ApiResult<T>> {
 	const { body, ...rest } = options;
 
 	const doFetch = (token: string | null) => {
@@ -76,7 +82,9 @@ export async function api<T>(
 		}
 	}
 
-	let payload: { status?: string; message?: string; data?: T; errors?: unknown } | undefined;
+	let payload:
+		| { status?: string; message?: string; data?: T; errors?: unknown; meta?: Meta }
+		| undefined;
 	try {
 		payload = (await response.json()) as typeof payload;
 	} catch {
@@ -95,5 +103,15 @@ export async function api<T>(
 		throw new ApiError(response.status, 'Respons server tidak valid.');
 	}
 
-	return payload.data;
+	return { data: payload.data, meta: payload.meta };
+}
+
+export const apiWithMeta = apiRaw;
+
+export async function api<T>(
+	path: string,
+	options: ApiOptions = {},
+	authenticated = false
+): Promise<T> {
+	return (await apiRaw<T>(path, options, authenticated)).data;
 }

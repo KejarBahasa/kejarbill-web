@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/Icon.svelte';
 	import { createGroup } from '$lib/api/groups';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { goto } from '$app/navigation';
 
@@ -25,7 +25,7 @@
 			toast.success('Grup dibuat.');
 			await goto(`/groups/${data.group_id}`);
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Terjadi kesalahan. Coba lagi.';
+			error = mapApiError(err, 'Terjadi kesalahan. Coba lagi.');
 		} finally {
 			loading = false;
 		}

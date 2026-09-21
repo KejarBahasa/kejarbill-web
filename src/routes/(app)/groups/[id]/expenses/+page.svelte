@@ -2,32 +2,52 @@
 	import { page } from '$app/state';
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupExpenses } from '$lib/api/expenses';
-	import { ApiError } from '$lib/types';
+	import { mapApiError } from '$lib/utils/errors';
+	import { formatIDR, formatDateShort } from '$lib/utils/format';
 	import type { ExpenseSummary } from '$lib/types/expense';
 
 	const id = String(page.params.id);
 
 	let expenses = $state<ExpenseSummary[]>([]);
 	let loading = $state(true);
+	let loadingMore = $state(false);
 	let error = $state('');
+	let pageNum = $state(1);
+	let totalItems = $state(0);
+
+	const hasMore = $derived(expenses.length < totalItems);
+
+	async function load() {
+		loading = true;
+		error = '';
+		pageNum = 1;
+		try {
+			const res = await getGroupExpenses(id, 1);
+			expenses = res.data.expenses;
+			totalItems = res.meta?.pagination?.total_items ?? res.data.expenses.length;
+		} catch (err) {
+			expenses = [];
+			error = mapApiError(err, 'Gagal memuat expense.');
+		} finally {
+			loading = false;
+		}
+	}
 
 	$effect(() => {
-		(async () => {
-			loading = true;
-			error = '';
-			try {
-				expenses = (await getGroupExpenses(id)).expenses;
-			} catch (err) {
-				expenses = [];
-				error = err instanceof ApiError ? err.message : 'Gagal memuat expense.';
-			} finally {
-				loading = false;
-			}
-		})();
+		void load();
 	});
 
-	function formatIDR(n: number) {
-		return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
+	async function loadMore() {
+		loadingMore = true;
+		try {
+			const res = await getGroupExpenses(id, pageNum + 1);
+			pageNum += 1;
+			expenses = [...expenses, ...res.data.expenses];
+		} catch (err) {
+			error = mapApiError(err, 'Gagal memuat expense.');
+		} finally {
+			loadingMore = false;
+		}
 	}
 </script>
 
@@ -59,13 +79,21 @@
 					<span class="e-icon"><Icon name="receipt" size={18} /></span>
 					<span class="e-body">
 						<strong>{e.title}</strong>
-						<span class="e-sub">{e.payer.display_name} · {new Date(e.expense_date).toLocaleDateString('id-ID')}</span>
+						<span class="e-sub">{e.payer.display_name} · {formatDateShort(e.expense_date)}</span>
 					</span>
 					<strong class="e-amount">{formatIDR(e.total_amount)}</strong>
 				</a>
 			</li>
 		{/each}
 	</ul>
+	<div class="pager">
+		<span class="muted">{expenses.length} dari {totalItems}</span>
+		{#if hasMore}
+			<button class="btn btn-ghost btn-mini" onclick={loadMore} disabled={loadingMore}>
+				Muat lagi
+			</button>
+		{/if}
+	</div>
 {/if}
 
 <style>
@@ -103,6 +131,21 @@
 
 	.muted {
 		color: var(--muted);
+	}
+
+	.pager {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-top: 14px;
+		font-size: 13px;
+	}
+
+	.btn-mini {
+		width: auto;
+		padding: 7px 12px;
+		font-size: 13px;
 	}
 
 	.list {

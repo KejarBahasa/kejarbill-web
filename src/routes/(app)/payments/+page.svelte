@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/Icon.svelte';
 	import { getPaymentMethods, setDefaultPaymentMethod, hidePaymentMethod, unhidePaymentMethod } from '$lib/api/paymentMethods';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { PaymentMethodSummary } from '$lib/types/paymentMethod';
 
@@ -17,7 +17,7 @@
 			methods = data.payment_methods;
 		} catch (err) {
 			methods = [];
-			error = err instanceof ApiError ? err.message : 'Gagal memuat metode pembayaran.';
+			error = mapApiError(err, 'Gagal memuat metode pembayaran.');
 		} finally {
 			loading = false;
 		}
@@ -33,7 +33,7 @@
 			methods = methods.map((x) => ({ ...x, is_default: x.id === m.id }));
 			toast.success('Metode default diperbarui.');
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Terjadi kesalahan.';
+			error = mapApiError(err, 'Terjadi kesalahan.');
 		}
 	}
 
@@ -43,7 +43,7 @@
 			await load();
 			toast.success(m.is_hidden ? 'Metode ditampilkan.' : 'Metode disembunyikan.');
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Terjadi kesalahan.';
+			error = mapApiError(err, 'Terjadi kesalahan.');
 		}
 	}
 
@@ -103,6 +103,9 @@
 					{/if}
 				</div>
 				<div class="pm-actions">
+					<a class="btn-mini" href={`/payments/${m.id}`} aria-label="Edit metode">
+						<Icon name="edit" size={16} />
+					</a>
 					<button class="btn-mini" onclick={() => toggleDefault(m)} aria-label="Jadikan default">
 						<Icon name="check-circle" size={16} />
 					</button>
@@ -113,6 +116,7 @@
 			</li>
 		{/each}
 	</ul>
+	<p class="foot-note">Metode pembayaran tidak bisa dihapus — gunakan tombol sembunyikan.</p>
 {/if}
 
 <style>
@@ -216,16 +220,23 @@
 		gap: 6px;
 	}
 
+	.foot-note {
+		margin-top: 16px;
+		font-size: 12.5px;
+		color: var(--muted);
+	}
+
 	.btn-mini {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		padding: 8px;
 		background: var(--surface-2);
-		border: 3px solid #000;
+		border: 1px solid var(--border, #000);
 		border-radius: 8px;
-		color: var(--text-2);
+		color: var(--text);
 		cursor: pointer;
+		text-decoration: none;
 		transition: border-color 0.15s ease, color 0.15s ease;
 	}
 

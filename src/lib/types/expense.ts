@@ -16,7 +16,7 @@ export interface ExpenseSummary {
 export interface ExpenseParticipant {
 	participant_id: string;
 	display_name: string;
-	participant_type: 'member' | 'guest';
+	participant_type: 'registered' | 'guest';
 	share_amount: number;
 }
 

@@ -43,6 +43,10 @@ export function addGuests(groupId: string, body: AddGuestsRequest) {
 	return api<null>(`/v1/groups/${groupId}/participants/guests`, { method: 'POST', body }, true);
 }
 
+export function claimGuest(groupId: string, participantId: string, body: { user_id: string }) {
+	return api<null>(`/v1/groups/${groupId}/participants/${participantId}/claim`, { method: 'PATCH', body }, true);
+}
+
 export function getGroupBalances(groupId: string) {
 	return api<Balance[]>(`/v1/groups/${groupId}/balances`, {}, true);
 }

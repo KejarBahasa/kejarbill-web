@@ -1,6 +1,6 @@
 export type PaymentChannel = 'cash' | 'bank_transfer' | 'ewallet';
 
-export type SettlementStatus = 'settled' | 'pending';
+export type SettlementStatus = 'pending' | 'completed' | 'cancelled';
 
 export interface ParticipantRef {
 	participant_id: string;
