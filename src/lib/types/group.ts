@@ -1,8 +1,13 @@
+export type GroupRole = 'member' | 'admin' | 'owner';
+
 export interface Participant {
 	id: string;
 	user_id: string | null;
-	participant_type: 'member' | 'guest';
+	participant_type: 'registered' | 'guest';
 	display_name: string;
+	/** role keanggotaan dari group_members; null utk guest */
+	role?: GroupRole | null;
+	is_self: boolean;
 }
 
 export interface CreateGroupRequest {
