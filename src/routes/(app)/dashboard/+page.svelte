@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/Icon.svelte';
 	import { getMe } from '$lib/api/users';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
 
 	let user = $state<{ name: string; username: string; email: string } | null>(null);
 	let loading = $state(true);
@@ -15,7 +15,7 @@
 				user = await getMe();
 			} catch (err) {
 				user = null;
-				error = err instanceof ApiError ? err.message : 'Gagal memuat profil.';
+				error = mapApiError(err, 'Gagal memuat profil.');
 			} finally {
 				loading = false;
 			}

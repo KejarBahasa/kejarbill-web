@@ -2,7 +2,8 @@
 	import { page } from '$app/state';
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupBalances, getGroupActivities } from '$lib/api/groups';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
+	import { formatIDR } from '$lib/utils/format';
 	import type { Balance, GroupActivity } from '$lib/types/group';
 
 	const id = String(page.params.id);
@@ -21,16 +22,13 @@
 				balances = b;
 				activities = a.activities;
 			} catch (err) {
-				error = err instanceof ApiError ? err.message : 'Gagal memuat data grup.';
+				error = mapApiError(err, 'Gagal memuat data grup.');
 			} finally {
 				loading = false;
 			}
 		})();
 	});
 
-	function formatIDR(n: number) {
-		return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
-	}
 </script>
 
 <svelte:head>

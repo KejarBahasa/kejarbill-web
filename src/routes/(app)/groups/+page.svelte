@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroups } from '$lib/api/groups';
-	import { ApiError } from '$lib/types';
+import { mapApiError } from '$lib/utils/errors';
 	import type { GroupDetail } from '$lib/types/group';
 
 	let groups = $state<GroupDetail[]>([]);
@@ -17,7 +17,7 @@
 				groups = data.groups;
 			} catch (err) {
 				groups = [];
-				error = err instanceof ApiError ? err.message : 'Gagal memuat grup.';
+				error = mapApiError(err, 'Gagal memuat grup.');
 			} finally {
 				loading = false;
 			}
