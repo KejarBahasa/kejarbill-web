@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, apiWithMeta, type ApiResult } from './client';
 import type {
 	CreateCustomExpenseRequest,
 	CreateEqualExpenseRequest,
@@ -12,15 +12,15 @@ export function createEqualExpense(body: CreateEqualExpenseRequest) {
 }
 
 export function createCustomExpense(body: CreateCustomExpenseRequest) {
-	return api<{ id: string }>('/v1/expenses/custom', { method: 'POST', body }, true);
+	return api<{ expense_id: string }>('/v1/expenses/custom', { method: 'POST', body }, true);
 }
 
 export function createItemizedExpense(body: CreateItemizedExpenseRequest) {
-	return api<{ id: string }>('/v1/expenses/itemized', { method: 'POST', body }, true);
+	return api<{ expense_id: string }>('/v1/expenses/itemized', { method: 'POST', body }, true);
 }
 
-export function getGroupExpenses(groupId: string) {
-	return api<ExpenseList>(`/v1/groups/${groupId}/expenses`, {}, true);
+export function getGroupExpenses(groupId: string, page = 1, limit = 20): Promise<ApiResult<ExpenseList>> {
+	return apiWithMeta<ExpenseList>(`/v1/groups/${groupId}/expenses?page=${page}&limit=${limit}`, {}, true);
 }
 
 export function getExpense(expenseId: string) {
