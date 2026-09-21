@@ -12,6 +12,24 @@
 	let error = $state('');
 	let usernameAvailable = $state<null | boolean>(null);
 
+	const USERNAME_RE = /^[a-z0-9_]([a-z0-9_.]*[a-z0-9_])?$/;
+	const NAME_RE = /^[A-Za-z0-9 ]+$/;
+
+	function usernameProblem(v: string): string {
+		if (v.length < 3 || v.length > 50) return 'Username 3–50 karakter.';
+		if (v.includes('..')) return 'Username tidak boleh memakai dua titik berurutan.';
+		if (!USERNAME_RE.test(v)) return 'Username: huruf kecil, angka, underscore, titik (tanpa spasi/kapital).';
+		return '';
+	}
+
+	function passwordProblem(v: string): string {
+		if (v.length < 8 || v.length > 128) return 'Password 8–128 karakter.';
+		if (/\s/.test(v)) return 'Password tidak boleh mengandung spasi.';
+		if (!/[A-Za-z]/.test(v) || !/[0-9]/.test(v) || !/[^A-Za-z0-9\s]/.test(v))
+			return 'Password harus mengandung huruf, angka, dan simbol (mis. ! $ #).';
+		return '';
+	}
+
 	async function handleCheckUsername() {
 		if (username.length < 3) return;
 		try {
@@ -26,6 +44,24 @@
 		error = '';
 		if (!name || !username || !email || !password) {
 			error = 'Semua field wajib diisi.';
+			return;
+		}
+		if (name.length > 100 || !NAME_RE.test(name)) {
+			error = 'Nama: huruf/angka/spasi, maks. 100 karakter.';
+			return;
+		}
+		const up = usernameProblem(username);
+		if (up) {
+			error = up;
+			return;
+		}
+		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) {
+			error = 'Alamat email tidak valid.';
+			return;
+		}
+		const pp = passwordProblem(password);
+		if (pp) {
+			error = pp;
 			return;
 		}
 
@@ -68,6 +104,7 @@
 			<label class="field">
 				<span class="field-label">USERNAME</span>
 				<input class="input" type="text" placeholder="budi.s" bind:value={username} onblur={handleCheckUsername} />
+				<span class="tip">3–50 karakter: huruf kecil, angka, underscore, titik</span>
 				{#if usernameAvailable === true}
 					<span class="tip success">✓ Tersedia</span>
 				{:else if usernameAvailable === false}
@@ -83,6 +120,7 @@
 			<label class="field">
 				<span class="field-label">PASSWORD</span>
 				<input class="input" type="password" placeholder="••••••••" bind:value={password} />
+				<span class="tip">8–128 karakter: huruf + angka + simbol, tanpa spasi</span>
 			</label>
 
 			<button class="btn btn-primary" type="submit" disabled={loading}>
