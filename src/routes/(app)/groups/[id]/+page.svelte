@@ -19,7 +19,7 @@
 			try {
 				const [b, a] = await Promise.all([getGroupBalances(id), getGroupActivities(id)]);
 				balances = b;
-				activities = a;
+				activities = a.activities;
 			} catch (err) {
 				error = err instanceof ApiError ? err.message : 'Gagal memuat data grup.';
 			} finally {
@@ -117,7 +117,8 @@
 
 	.block {
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 		padding: 20px;
 	}
@@ -161,7 +162,7 @@
 		gap: 12px;
 		align-items: flex-start;
 		padding: 10px 0;
-		border-bottom: 1px solid var(--border);
+		border-bottom: 2px solid #000;
 	}
 
 	.activity:last-child {

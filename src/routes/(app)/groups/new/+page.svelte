@@ -23,7 +23,7 @@
 				description: description.trim() || undefined
 			});
 			toast.success('Grup dibuat.');
-			await goto(`/groups/${data.id}`);
+			await goto(`/groups/${data.group_id}`);
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Terjadi kesalahan. Coba lagi.';
 		} finally {
@@ -87,7 +87,8 @@
 		gap: 16px;
 		padding: 28px;
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 	}
 

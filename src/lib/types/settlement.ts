@@ -1,5 +1,3 @@
-import type { ApiResponse } from './index';
-
 export type PaymentChannel = 'cash' | 'bank_transfer' | 'ewallet';
 
 export type SettlementStatus = 'settled' | 'pending';
@@ -40,5 +38,7 @@ export interface CreateSettlementRequest {
 	amount: number;
 }
 
-export type ApiSettlements = ApiResponse<SettlementSummary[]>;
-export type ApiSettlementDetail = ApiResponse<SettlementDetail>;
+export interface SettlementList {
+	settlements: SettlementSummary[];
+}
+

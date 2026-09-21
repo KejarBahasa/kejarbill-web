@@ -155,7 +155,8 @@
 		gap: 16px;
 		padding: 28px;
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 	}
 
@@ -185,7 +186,7 @@
 		gap: 6px;
 		padding: 4px;
 		background: var(--surface-2);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
 		border-radius: var(--radius-sm);
 	}
 

@@ -3,9 +3,9 @@ import type {
 	AddGuestsRequest,
 	AddMembersBulkRequest,
 	AddMembersRequest,
+	ActivityList,
 	Balance,
 	CreateGroupRequest,
-	GroupActivity,
 	GroupDetail,
 	GroupList,
 	ParticipantList
@@ -16,7 +16,7 @@ export function getGroups() {
 }
 
 export function createGroup(body: CreateGroupRequest) {
-	return api<{ id: string }>('/v1/groups', { method: 'POST', body }, true);
+	return api<{ group_id: string }>('/v1/groups', { method: 'POST', body }, true);
 }
 
 export function getGroup(groupId: string) {
@@ -24,7 +24,7 @@ export function getGroup(groupId: string) {
 }
 
 export function getGroupActivities(groupId: string) {
-	return api<GroupActivity[]>(`/v1/groups/${groupId}/activities`, {}, true);
+	return api<ActivityList>(`/v1/groups/${groupId}/activities`, {}, true);
 }
 
 export function addMember(groupId: string, body: AddMembersRequest) {

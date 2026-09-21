@@ -169,7 +169,8 @@
 		gap: 14px;
 		padding: 16px 18px;
 		background: var(--surface);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 	}
 
@@ -221,7 +222,7 @@
 		justify-content: center;
 		padding: 8px;
 		background: var(--surface-2);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
 		border-radius: 8px;
 		color: var(--text-2);
 		cursor: pointer;
@@ -229,7 +230,7 @@
 	}
 
 	.btn-mini:hover {
-		border-color: var(--border-strong);
+		border-color: #000;
 		color: var(--text);
 	}
 
@@ -280,7 +281,7 @@
 	.btn-ghost {
 		width: auto;
 		background: var(--surface-2);
-		border: 1px solid var(--border);
+		border: 3px solid #000;
 		color: var(--text);
 	}
 </style>

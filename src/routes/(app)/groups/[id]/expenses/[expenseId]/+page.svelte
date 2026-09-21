@@ -185,6 +185,7 @@
 	.block {
 		background: var(--surface);
 		border: 3px solid #000;
+		box-shadow: var(--shadow);
 		border-radius: var(--radius);
 		box-shadow: var(--shadow);
 		padding: 18px;

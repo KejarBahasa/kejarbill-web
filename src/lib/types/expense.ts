@@ -1,5 +1,3 @@
-import type { ApiResponse } from './index';
-
 export interface ExpensePayer {
 	participant_id: string;
 	display_name: string;
@@ -78,5 +76,7 @@ export interface CreateItemizedExpenseRequest {
 	}>;
 }
 
-export type ApiExpenses = ApiResponse<ExpenseSummary[]>;
-export type ApiExpenseDetail = ApiResponse<ExpenseDetail>;
+export interface ExpenseList {
+	expenses: ExpenseSummary[];
+}
+

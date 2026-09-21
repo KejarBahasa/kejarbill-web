@@ -1,5 +1,3 @@
-import type { ApiResponse } from './index';
-
 export interface LoginRequest {
 	identifier: string;
 	password: string;
