@@ -8,6 +8,7 @@ import type {
 	CreateGroupRequest,
 	GroupDetail,
 	GroupList,
+	GroupSummary,
 	ParticipantList
 } from '../types/group';
 
@@ -21,6 +22,10 @@ export function createGroup(body: CreateGroupRequest) {
 
 export function getGroup(groupId: string) {
 	return api<GroupDetail>(`/v1/groups/${groupId}`, {}, true);
+}
+
+export function getGroupSummary(groupId: string) {
+	return api<GroupSummary>(`/v1/groups/${groupId}/summary`, {}, true);
 }
 
 export function getGroupActivities(groupId: string) {

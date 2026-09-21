@@ -45,6 +45,15 @@
 
 	const hasMore = $derived(settlements.length < totalItems);
 
+	const selfP = $derived(participants.find((p) => p.is_self));
+	const canManage = $derived(selfP?.role === 'owner' || selfP?.role === 'admin');
+
+	/** yang boleh dicatat settlement-nya oleh user ini: dirinya sendiri + (khusus owner/admin) para tamu */
+	const fromOptions = $derived([
+		...(selfP ? [selfP] : []),
+		...(canManage ? participants.filter((p) => p.participant_type === 'guest') : [])
+	]);
+
 	async function load() {
 		loading = true;
 		listError = '';
@@ -56,14 +65,11 @@
 			totalPages = s.meta?.pagination?.total_pages ?? 1;
 			participants = p.participants;
 			const me = participants.find((x) => x.is_self);
+			const presetTo = page.url.searchParams.get('to');
+			const validPreset = presetTo && p.participants.some((x) => x.id === presetTo && x.id !== me?.id);
 			const other = participants.find((x) => !x.is_self);
-			if (me && other) {
-				from_participant_id = me.id;
-				to_participant_id = other.id;
-			} else if (participants.length >= 2) {
-				from_participant_id = participants[0].id;
-				to_participant_id = participants[1].id;
-			}
+			from_participant_id = me?.id ?? participants[0]?.id ?? '';
+			to_participant_id = validPreset ? presetTo : (other?.id ?? participants[1]?.id ?? '');
 		} catch (err) {
 			settlements = [];
 			participants = [];
@@ -196,19 +202,29 @@
 			</div>
 		{/if}
 		<form class="form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-			<label class="field">
-				<span class="field-label">Dibayar oleh</span>
-				<select class="input" bind:value={from_participant_id}>
-					{#each participants as p (p.id)}
-						<option value={p.id}>{p.display_name}</option>
-					{/each}
-				</select>
-			</label>
+			{#if fromOptions.length > 1}
+				<label class="field">
+					<span class="field-label">Dibayar oleh</span>
+					<select class="input" bind:value={from_participant_id}>
+						{#each fromOptions as p (p.id)}
+							<option value={p.id}>
+								{p.display_name}{p.is_self ? ' (kamu)' : p.participant_type === 'guest' ? ' — tamu' : ''}
+							</option>
+						{/each}
+					</select>
+					<span class="hint muted">Kamu hanya bisa mencatat pembayaran untuk diri sendiri dan tamu grup.</span>
+				</label>
+			{:else}
+				<div class="field">
+					<span class="field-label">Dibayar oleh</span>
+					<span class="chip">{selfP?.display_name ?? '—'} (kamu)</span>
+				</div>
+			{/if}
 
 			<label class="field">
 				<span class="field-label">Dibayar kepada</span>
 				<select class="input" bind:value={to_participant_id}>
-					{#each participants as p (p.id)}
+					{#each participants.filter((p) => p.id !== from_participant_id) as p (p.id)}
 						<option value={p.id}>{p.display_name}</option>
 					{/each}
 				</select>
