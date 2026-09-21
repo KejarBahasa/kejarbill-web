@@ -27,6 +27,7 @@ const messages: Record<string, string> = {
 	'participant not found': 'Participant tidak ditemukan.',
 	'participant is not a claimable guest': 'Participant ini bukan tamu yang bisa di-claim.',
 	'invalid settlement participants': 'Peserta settlement tidak valid.',
+	'settlement sender not allowed': 'Kamu hanya bisa mencatat settlement untuk dirimu sendiri atau tamu grup.',
 	'settlement amount exceeded outstanding balance':
 		'Jumlah melebihi saldo utang peserta tersebut ke penerima.',
 	'idempotency key is required': 'Terjadi kesalahan permintaan. Coba lagi.',

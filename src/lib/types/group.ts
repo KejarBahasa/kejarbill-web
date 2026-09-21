@@ -23,6 +23,13 @@ export interface GroupDetail extends CreateGroupRequest {
 	total_expenses: number;
 }
 
+export interface GroupSummary {
+	group_total: number;
+	my_total_paid: number;
+	my_total_debt: number;
+	my_total_credit: number;
+}
+
 export type ActivityType = 'expense' | 'settlement';
 export interface GroupActivity {
 	type: ActivityType;

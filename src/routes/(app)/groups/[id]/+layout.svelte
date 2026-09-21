@@ -24,7 +24,7 @@
 	});
 
 	const tabs = $derived([
-		{ href: `/groups/${id}`, label: 'Ringkasan', match: '' },
+		{ href: `/groups/${id}`, label: 'Dashboard', match: '' },
 		{ href: `/groups/${id}/expenses`, label: 'Expense', match: '/expenses' },
 		{ href: `/groups/${id}/settlements`, label: 'Settlement', match: '/settlements' },
 		{ href: `/groups/${id}/members`, label: 'Anggota', match: '/members' }
