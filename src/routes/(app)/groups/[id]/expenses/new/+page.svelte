@@ -3,7 +3,8 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupParticipants } from '$lib/api/groups';
 	import { createEqualExpense, createCustomExpense, createItemizedExpense } from '$lib/api/expenses';
-import { mapApiError } from '$lib/utils/errors';
+	import { mapApiError } from '$lib/utils/errors';
+	import { formatJakartaDateTimeInput, jakartaInputToISO } from '$lib/utils/format';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { Participant } from '$lib/types/group';
 	import { goto } from '$app/navigation';
@@ -17,7 +18,7 @@ import { mapApiError } from '$lib/utils/errors';
 	let description = $state('');
 	let total_amount = $state(0);
 	let currency = 'IDR';
-	let expense_date = $state(new Date().toISOString());
+	let expense_date = $state(formatJakartaDateTimeInput());
 	let payer_participant_id = $state('');
 	let participants = $state<Participant[]>([]);
 	let selected = $state<Record<string, boolean>>({});
@@ -74,7 +75,7 @@ import { mapApiError } from '$lib/utils/errors';
 		error = validateCommon();
 		if (error) return;
 
-		const date = expense_date;
+		const date = jakartaInputToISO(expense_date);
 		const common = {
 			group_id: id,
 			title: title.trim(),
@@ -171,8 +172,9 @@ import { mapApiError } from '$lib/utils/errors';
 		</label>
 
 		<label class="field">
-			<span class="field-label">Tanggal</span>
-			<input class="input" type="date" bind:value={expense_date} />
+			<span class="field-label">Tanggal & waktu</span>
+			<input class="input" type="datetime-local" step="60" bind:value={expense_date} />
+			<span class="hint muted">Waktu menggunakan zona Asia/Jakarta (UTC+07:00).</span>
 		</label>
 
 		<fieldset class="field-group">

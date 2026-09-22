@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import Icon from '$lib/components/Icon.svelte';
-	import { getGroupParticipants } from '$lib/api/groups';
+	import { getGroupBalances, getGroupParticipants } from '$lib/api/groups';
 	import { getGroupSettlements, createSettlement } from '$lib/api/settlements';
 	import { getRecipientPaymentMethods } from '$lib/api/paymentMethods';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { mapApiError } from '$lib/utils/errors';
-	import { formatIDR, formatDateShort } from '$lib/utils/format';
-	import type { Participant } from '$lib/types/group';
+	import { formatIDR, formatDateShort, jakartaInputToISO } from '$lib/utils/format';
+	import type { Balance, Participant } from '$lib/types/group';
 	import type { SettlementSummary, PaymentChannel } from '$lib/types/settlement';
 	import type { PaymentMethodSummary } from '$lib/types/paymentMethod';
 
@@ -15,6 +15,7 @@
 
 	let settlements = $state<SettlementSummary[]>([]);
 	let participants = $state<Participant[]>([]);
+	let balances = $state<Balance[]>([]);
 	let recipientMethods = $state<PaymentMethodSummary[]>([]);
 	let loading = $state(true);
 	let loadingMore = $state(false);
@@ -54,29 +55,63 @@
 		...(canManage ? participants.filter((p) => p.participant_type === 'guest') : [])
 	]);
 
+	const payableBalances = $derived(
+		balances
+			.filter((balance) => {
+				if (selfP && balance.from_participant.id === selfP.id) return true;
+				return canManage && participants.some(
+					(p) => p.id === balance.from_participant.id && p.participant_type === 'guest'
+				);
+			})
+			.sort((a, b) => b.amount - a.amount)
+	);
+
+	const selectedPayee = $derived(
+		participants.find((participant) => participant.id === to_participant_id)
+	);
+
+	const selectedPayer = $derived(
+		participants.find((participant) => participant.id === from_participant_id)
+	);
+
 	async function load() {
 		loading = true;
 		listError = '';
 		pageNum = 1;
 		try {
-			const [s, p] = await Promise.all([getGroupSettlements(id, 1), getGroupParticipants(id)]);
+			const [s, p, b] = await Promise.all([
+				getGroupSettlements(id, 1),
+				getGroupParticipants(id),
+				getGroupBalances(id)
+			]);
 			settlements = s.data.settlements;
 			totalItems = s.meta?.pagination?.total_items ?? s.data.settlements.length;
 			totalPages = s.meta?.pagination?.total_pages ?? 1;
 			participants = p.participants;
+			balances = b;
 			const me = participants.find((x) => x.is_self);
 			const presetTo = page.url.searchParams.get('to');
+			const presetAmount = Number(page.url.searchParams.get('amount'));
 			const validPreset = presetTo && p.participants.some((x) => x.id === presetTo && x.id !== me?.id);
 			const other = participants.find((x) => !x.is_self);
 			from_participant_id = me?.id ?? participants[0]?.id ?? '';
 			to_participant_id = validPreset ? presetTo : (other?.id ?? participants[1]?.id ?? '');
+			amount = Number.isFinite(presetAmount) && presetAmount > 0 ? presetAmount : 0;
 		} catch (err) {
 			settlements = [];
 			participants = [];
+			balances = [];
 			listError = mapApiError(err, 'Gagal memuat data settlement.');
 		} finally {
 			loading = false;
 		}
+	}
+
+	function startPayment(balance: Balance) {
+		from_participant_id = balance.from_participant.id;
+		to_participant_id = balance.to_participant.id;
+		amount = balance.amount;
+		document.getElementById('settlement-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
 	$effect(() => {
@@ -137,7 +172,7 @@
 					payment_channel,
 					payment_method_id: payment_channel === 'cash' ? undefined : payment_method_id,
 					notes: notes.trim() || undefined,
-					paid_at: new Date(paid_at + 'T00:00:00Z').toISOString(),
+					paid_at: jakartaInputToISO(`${paid_at}T00:00`),
 					amount
 				},
 				idemKey
@@ -158,6 +193,39 @@
 </svelte:head>
 
 <div class="cols">
+		<section class="block">
+			<h2 class="block-title">Utang yang Perlu Dibayar</h2>
+			{#if payableBalances.length === 0}
+				<div class="empty-payable">
+					<span class="empty-icon"><Icon name="check-circle" size={18} /></span>
+					<div>
+						<strong>Semua sudah beres</strong>
+						<p class="muted">Tidak ada utang yang perlu dibayar.</p>
+					</div>
+				</div>
+			{:else}
+				<ul class="payable-list">
+				{#each payableBalances as balance (balance.from_participant.id + balance.to_participant.id)}
+					<li class="payable-item">
+						<div class="payable-copy">
+							<span class="payable-kicker">
+								{balance.from_participant.id === selfP?.id
+									? 'Kamu berutang kepada'
+									: `${balance.from_participant.display_name} membayar kepada`}
+							</span>
+							<strong>{balance.to_participant.display_name}</strong>
+							<span class="payable-amount">{formatIDR(balance.amount)}</span>
+						</div>
+						<button class="btn btn-primary btn-pay" type="button" onclick={() => startPayment(balance)}>
+							<Icon name="wallet" size={15} />
+							Bayar
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+
 	<section class="block">
 		<h2 class="block-title">Riwayat Settlement</h2>
 		{#if listError}
@@ -194,14 +262,20 @@
 	</section>
 
 	<section class="block">
-		<h2 class="block-title">Catat Settlement</h2>
+		<h2 class="block-title">{selectedPayee ? `Bayar kepada ${selectedPayee.display_name}` : 'Catat Settlement'}</h2>
+		{#if selectedPayee}
+			<p class="form-context">
+				{selectedPayer?.participant_type === 'guest' ? `${selectedPayer.display_name} membayar` : 'Kamu membayar'}
+				<strong>{selectedPayee.display_name}</strong>. Nominal di bawah otomatis mengikuti seluruh utang dan masih bisa diubah untuk pembayaran sebagian.
+			</p>
+		{/if}
 		{#if error}
 			<div class="alert alert-error" role="alert">
 				<span class="alert-icon"><Icon name="alert" size={17} /></span>
 				<span>{error}</span>
 			</div>
 		{/if}
-		<form class="form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+		<form id="settlement-form" class="form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 			{#if fromOptions.length > 1}
 				<label class="field">
 					<span class="field-label">Dibayar oleh</span>
@@ -232,8 +306,9 @@
 
 			<div class="grid2">
 				<label class="field">
-					<span class="field-label">Jumlah (IDR)</span>
+					<span class="field-label">Jumlah yang dibayar (IDR)</span>
 					<input class="input" type="number" min="0" bind:value={amount} />
+					<span class="hint muted">Nominal penuh terisi otomatis, tetapi boleh diubah untuk bayar sebagian.</span>
 				</label>
 				<label class="field">
 					<span class="field-label">Tanggal</span>
@@ -347,6 +422,82 @@
 		padding-bottom: 0;
 	}
 
+	.payable-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.payable-item {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-height: 66px;
+		padding-bottom: 10px;
+		border-bottom: 2px solid #000;
+	}
+
+	.payable-item:last-child {
+		border-bottom: none;
+		padding-bottom: 0;
+	}
+
+	.payable-copy {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.payable-kicker {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--muted);
+	}
+
+	.payable-copy strong {
+		font-size: 15px;
+	}
+
+	.payable-amount {
+		font-size: 14px;
+		font-weight: 700;
+		color: var(--danger);
+	}
+
+	.payable-item .btn {
+		flex-shrink: 0;
+	}
+
+	.empty-payable {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 0 4px;
+	}
+
+	.empty-payable p {
+		margin-top: 3px;
+		font-size: 13px;
+	}
+
+	.empty-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 34px;
+		height: 34px;
+		flex-shrink: 0;
+		border: 2px solid #000;
+		border-radius: 50%;
+		background: var(--success);
+		color: #000;
+	}
+
 	.row {
 		display: flex;
 		align-items: center;
@@ -398,6 +549,17 @@
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
+	}
+
+	.form-context {
+		margin: -6px 0 16px;
+		font-size: 13px;
+		line-height: 1.5;
+		color: var(--muted);
+	}
+
+	.form-context strong {
+		color: var(--text);
 	}
 
 	.grid2 {

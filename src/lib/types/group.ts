@@ -30,6 +30,37 @@ export interface GroupSummary {
 	my_total_credit: number;
 }
 
+export type DebtStatus = 'unpaid' | 'partial' | 'paid';
+
+export interface MyDebtExpense {
+	expense_id: string;
+	title: string;
+	expense_date: string;
+	amount: number;
+	paid_amount: number;
+	remaining_amount: number;
+	status: DebtStatus;
+}
+
+export interface MyDebt {
+	to_participant: {
+		id: string;
+		display_name: string;
+	};
+	total_amount: number;
+	paid_amount: number;
+	remaining_amount: number;
+	status: DebtStatus;
+	expenses: MyDebtExpense[];
+}
+
+export interface MyDebtsResponse {
+	debts: MyDebt[];
+	total_amount: number;
+	paid_amount: number;
+	remaining_amount: number;
+}
+
 export type ActivityType = 'expense' | 'settlement';
 export interface GroupActivity {
 	type: ActivityType;

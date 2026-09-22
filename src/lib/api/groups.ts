@@ -9,6 +9,7 @@ import type {
 	GroupDetail,
 	GroupList,
 	GroupSummary,
+	MyDebtsResponse,
 	ParticipantList
 } from '../types/group';
 
@@ -26,6 +27,10 @@ export function getGroup(groupId: string) {
 
 export function getGroupSummary(groupId: string) {
 	return api<GroupSummary>(`/v1/groups/${groupId}/summary`, {}, true);
+}
+
+export function getMyDebts(groupId: string) {
+	return api<MyDebtsResponse>(`/v1/groups/${groupId}/my-debts`, {}, true);
 }
 
 export function getGroupActivities(groupId: string) {
