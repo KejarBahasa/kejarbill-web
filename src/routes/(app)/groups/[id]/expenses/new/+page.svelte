@@ -3,7 +3,8 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupParticipants } from '$lib/api/groups';
 	import { createEqualExpense, createCustomExpense, createItemizedExpense } from '$lib/api/expenses';
-import { mapApiError } from '$lib/utils/errors';
+	import { mapApiError } from '$lib/utils/errors';
+	import { formatIDR, formatJakartaDateTimeInput, jakartaInputToISO } from '$lib/utils/format';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { Participant } from '$lib/types/group';
 	import { goto } from '$app/navigation';
@@ -17,13 +18,15 @@ import { mapApiError } from '$lib/utils/errors';
 	let description = $state('');
 	let total_amount = $state(0);
 	let currency = 'IDR';
-	let expense_date = $state(new Date().toISOString());
+	let expense_date = $state(formatJakartaDateTimeInput());
 	let payer_participant_id = $state('');
 	let participants = $state<Participant[]>([]);
 	let selected = $state<Record<string, boolean>>({});
 	let customShares = $state<Record<string, number>>({});
-	let items = $state<Array<{ name: string; participant_id: string; qty: number; unit_price: number; notes: string }>>([
-		{ name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }
+	let equalShares = $state<Record<string, number>>({});
+	let equalSharesEdited = $state(false);
+	let items = $state<Array<{ id: string; name: string; participant_ids: string[]; qty: number; unit_price: number; notes: string }>>([
+		{ id: crypto.randomUUID(), name: '', participant_ids: [], qty: 1, unit_price: 0, notes: '' }
 	]);
 	let loading = $state(true);
 	let error = $state('');
@@ -49,18 +52,102 @@ import { mapApiError } from '$lib/utils/errors';
 
 	function toggleParticipant(pid: string) {
 		selected[pid] = !selected[pid];
+		resetEqualShares();
+	}
+
+	function selectAllParticipants() {
+		selected = Object.fromEntries(participants.map((p) => [p.id, true]));
+		resetEqualShares();
+	}
+
+	function clearParticipants() {
+		selected = {};
+		resetEqualShares();
 	}
 
 	function selectedIds() {
 		return Object.entries(selected).filter(([, v]) => v).map(([pid]) => pid);
 	}
 
+	function resetEqualShares() {
+		equalShares = {};
+		equalSharesEdited = false;
+	}
+
+	function defaultEqualShares() {
+		const ids = selectedIds();
+		if (!ids.length) return {};
+		const base = Math.floor((Number(total_amount) || 0) / ids.length);
+		const remainder = (Number(total_amount) || 0) % ids.length;
+		return Object.fromEntries(ids.map((pid, index) => [pid, base + (index < remainder ? 1 : 0)]));
+	}
+
+	function equalShareFor(pid: string) {
+		return equalSharesEdited ? Number(equalShares[pid] ?? 0) : Number(defaultEqualShares()[pid] ?? 0);
+	}
+
+	function editEqualShare(pid: string, value: string) {
+		if (!equalSharesEdited) equalShares = defaultEqualShares();
+		equalSharesEdited = true;
+		equalShares[pid] = Number(value) || 0;
+	}
+
+	function equalShareTotal() {
+		return selectedIds().reduce((sum, pid) => sum + equalShareFor(pid), 0);
+	}
+
+	function participantSecondaryText(p: Participant) {
+		if (p.username) return `@${p.username}`;
+		return p.participant_type === 'guest' ? 'Tamu' : 'Akun terdaftar';
+	}
+
+	const selectedCount = $derived(selectedIds().length);
+	const allParticipantsSelected = $derived(participants.length > 0 && selectedCount === participants.length);
+
 	function addItem() {
-		items = [...items, { name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }];
+		items = [...items, { id: crypto.randomUUID(), name: '', participant_ids: [], qty: 1, unit_price: 0, notes: '' }];
 	}
 
 	function removeItem(i: number) {
 		items = items.filter((_, idx) => idx !== i);
+	}
+
+	function toggleItemParticipant(itemId: string, participantId: string) {
+		items = items.map((item) => {
+			if (item.id !== itemId) return item;
+			const selected = item.participant_ids.includes(participantId);
+			return {
+				...item,
+				participant_ids: selected
+					? item.participant_ids.filter((id) => id !== participantId)
+					: [...item.participant_ids, participantId]
+			};
+		});
+	}
+
+	function selectAllItemParticipants(itemId: string) {
+		items = items.map((item) => item.id === itemId ? { ...item, participant_ids: participants.map((p) => p.id) } : item);
+	}
+
+	function clearItemParticipants(itemId: string) {
+		items = items.map((item) => item.id === itemId ? { ...item, participant_ids: [] } : item);
+	}
+
+	function itemSubtotal(item: (typeof items)[number]) {
+		return (Number(item.qty) || 0) * (Number(item.unit_price) || 0);
+	}
+
+	function itemShare(item: (typeof items)[number], participantId: string) {
+		const index = item.participant_ids.indexOf(participantId);
+		if (index < 0 || item.participant_ids.length === 0) return 0;
+		const subtotal = itemSubtotal(item);
+		const base = Math.floor(subtotal / item.participant_ids.length);
+		const remainder = subtotal % item.participant_ids.length;
+		return base + (index < remainder ? 1 : 0);
+	}
+
+	function participantItemTotal(participantId: string) {
+		return items.reduce((sum, item) => sum + itemShare(item, participantId), 0);
 	}
 
 	function validateCommon(): string {
@@ -74,7 +161,7 @@ import { mapApiError } from '$lib/utils/errors';
 		error = validateCommon();
 		if (error) return;
 
-		const date = expense_date;
+		const date = jakartaInputToISO(expense_date);
 		const common = {
 			group_id: id,
 			title: title.trim(),
@@ -98,12 +185,20 @@ import { mapApiError } from '$lib/utils/errors';
 					loading = false;
 					return;
 				}
-				if (total_amount % ids.length !== 0) {
-					error = `Total harus habis dibagi ${ids.length} peserta (Rp${total_amount.toLocaleString('id-ID')} tidak pas).`;
+				if (equalSharesEdited && equalShareTotal() !== Number(total_amount)) {
+					error = `Total pembagian harus sama dengan ${formatIDR(Number(total_amount))}.`;
 					loading = false;
 					return;
 				}
-				await createEqualExpense({ ...common, participant_ids: ids, total_amount });
+				const needsExplicitShares = equalSharesEdited || Number(total_amount) % ids.length !== 0;
+				if (needsExplicitShares) {
+					await createCustomExpense({
+						...common,
+						participants: ids.map((pid) => ({ participant_id: pid, share_amount: equalShareFor(pid) }))
+					});
+				} else {
+					await createEqualExpense({ ...common, participant_ids: ids, total_amount });
+				}
 			} else if (mode === 'custom') {
 				const shares = Object.entries(customShares)
 					.filter(([pid]) => selected[pid])
@@ -115,14 +210,14 @@ import { mapApiError } from '$lib/utils/errors';
 				}
 				await createCustomExpense({ ...common, participants: shares });
 			} else {
-				if (items.some((it) => !it.name.trim() || !it.participant_id || it.qty <= 0 || it.unit_price <= 0)) {
-					error = 'Lengkapi semua item (nama, peserta, qty, harga).';
+				if (items.some((it) => !it.name.trim() || it.participant_ids.length < 1 || it.qty <= 0 || it.unit_price <= 0)) {
+					error = 'Lengkapi semua item (nama, minimal satu peserta, qty, harga).';
 					loading = false;
 					return;
 				}
 				await createItemizedExpense({
 					...common,
-					items: items.map((it) => ({ name: it.name.trim(), participant_id: it.participant_id, qty: it.qty, unit_price: it.unit_price, notes: it.notes.trim() || undefined }))
+					items: items.map((it) => ({ name: it.name.trim(), participant_ids: it.participant_ids, qty: it.qty, unit_price: it.unit_price, notes: it.notes.trim() || undefined }))
 				});
 			}
 			toast.success('Expense disimpan.');
@@ -146,7 +241,7 @@ import { mapApiError } from '$lib/utils/errors';
 {#if loading}
 	<div class="status"><span class="spinner"></span> Memuat…</div>
 {:else}
-	<form class="card" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+	<form class="card expense-card" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 		{#if error}
 			<div class="alert alert-error" role="alert">
 				<span class="alert-icon"><Icon name="alert" size={17} /></span>
@@ -170,44 +265,90 @@ import { mapApiError } from '$lib/utils/errors';
 			<input class="input" type="text" placeholder="cth: Nasi goreng & es teh" bind:value={description} />
 		</label>
 
-		<label class="field">
-			<span class="field-label">Tanggal</span>
-			<input class="input" type="date" bind:value={expense_date} />
-		</label>
+		<div class="compact-fields">
+			<label class="field">
+				<span class="field-label">Tanggal & waktu</span>
+				<input class="input" type="datetime-local" step="60" bind:value={expense_date} />
+				<span class="hint muted">Asia/Jakarta (UTC+07:00).</span>
+			</label>
 
-		<fieldset class="field-group">
-			<span class="field-label">Dibayar oleh</span>
-			<select class="input" bind:value={payer_participant_id}>
-				{#each participants as p (p.id)}
-					<option value={p.id}>{p.display_name}</option>
-				{/each}
-			</select>
-		</fieldset>
+			<fieldset class="field-group">
+				<span class="field-label">Dibayar oleh</span>
+				<select class="input" bind:value={payer_participant_id}>
+					{#each participants as p (p.id)}
+						<option value={p.id}>{p.display_name}{p.username ? ` (@${p.username})` : p.participant_type === 'guest' ? ' (tamu)' : ''}</option>
+					{/each}
+				</select>
+			</fieldset>
+		</div>
 
 		{#if mode === 'equal'}
-			<label class="field">
+			<label class="field amount-field">
 				<span class="field-label">Total ({currency})</span>
-				<input class="input" type="number" min="0" bind:value={total_amount} />
+				<input class="input" type="number" min="0" bind:value={total_amount} oninput={resetEqualShares} />
 			</label>
-			<fieldset class="field-group">
-				<span class="field-label">Dibagi ke peserta</span>
-				<div class="check-grid">
+			<div class="split-layout">
+			<fieldset class="field-group participant-panel">
+				<div class="participant-heading">
+					<span class="field-label">Dibagi ke peserta</span>
+					<div class="participant-actions">
+						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants} disabled={allParticipantsSelected}>Pilih semua</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants} disabled={selectedCount === 0}>Kosongkan</button>
+					</div>
+				</div>
+				<div class="participant-grid">
 					{#each participants as p (p.id)}
-						<label class="check">
+						<label class="participant-card" class:selected={!!selected[p.id]}>
 							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
-							<span>{p.display_name}</span>
+							<span class="participant-copy"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+							<span class="participant-check"><Icon name="check-circle" size={15} /></span>
 						</label>
 					{/each}
 				</div>
-			</fieldset>
+				</fieldset>
+
+				{#if selectedIds().length > 0}
+					<div class="split-preview">
+						<div class="split-preview-head">
+							<div><strong>Preview pembagian</strong><span>Nominal awal dibagi rata, lalu bisa disesuaikan.</span></div>
+							<span class:total-ok={equalShareTotal() === Number(total_amount)} class:total-bad={equalShareTotal() !== Number(total_amount)}>
+								{equalShareTotal() === Number(total_amount) ? `Total sesuai ${formatIDR(Number(total_amount))}` : `Selisih ${formatIDR(Math.abs(Number(total_amount) - equalShareTotal()))}`}
+							</span>
+						</div>
+						<div class="split-rows">
+							{#each participants.filter((p) => selected[p.id]) as p (p.id)}
+								<label class="split-row">
+									<span><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+									<input class="input split-input" type="number" min="0" value={equalShareFor(p.id)} oninput={(event) => editEqualShare(p.id, event.currentTarget.value)} />
+								</label>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
 		{:else if mode === 'custom'}
 			<fieldset class="field-group">
-				<span class="field-label">Peserta & pembagian</span>
+				<div class="participant-heading">
+					<span class="field-label">Peserta & pembagian</span>
+					<div class="participant-actions">
+						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants} disabled={allParticipantsSelected}>Pilih semua</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants} disabled={selectedCount === 0}>Kosongkan</button>
+					</div>
+				</div>
+				<div class="participant-grid">
+					{#each participants as p (p.id)}
+						<label class="participant-card" class:selected={!!selected[p.id]}>
+							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
+							<span class="participant-copy"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+							<span class="participant-check"><Icon name="check-circle" size={15} /></span>
+						</label>
+					{/each}
+				</div>
 				<div class="custom-rows">
 					{#each participants as p (p.id)}
 						{#if selected[p.id]}
 							<div class="custom-row">
-								<span class="c-name">{p.display_name}</span>
+								<span class="c-name"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
 								<div class="c-input-wrap">
 									<span class="c-cur">{currency}</span>
 									<input class="input c-input" type="number" min="0" placeholder="0" bind:value={customShares[p.id]} />
@@ -216,42 +357,64 @@ import { mapApiError } from '$lib/utils/errors';
 						{/if}
 					{/each}
 				</div>
-				<div class="check-grid">
-					{#each participants as p (p.id)}
-						<label class="check">
-							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
-							<span>{p.display_name}</span>
-						</label>
-					{/each}
-				</div>
 			</fieldset>
 		{:else}
 			<fieldset class="field-group">
-				<span class="field-label">Item</span>
+				<div class="item-section-heading">
+					<div><span class="field-label">Item belanja</span><small>Atur siapa saja yang ikut menanggung tiap item.</small></div>
+				</div>
 				<div class="items">
-					{#each items as item, i (item.name + i)}
-						<div class="item-row">
-							<input class="input" type="text" placeholder="Nama item" bind:value={item.name} />
-							<select class="input" bind:value={item.participant_id}>
-								<option value="" disabled>Peserta</option>
-								{#each participants as p (p.id)}
-									<option value={p.id}>{p.display_name}</option>
-								{/each}
-							</select>
-							<div class="qty">
-								<input class="input" type="number" min="1" placeholder="Qty" bind:value={item.qty} />
-								<span class="mul">×</span>
-								<input class="input" type="number" min="0" placeholder="Harga" bind:value={item.unit_price} />
+					{#each items as item, i (item.id)}
+						<div class="item-card">
+							<div class="item-row">
+								<input class="input" type="text" placeholder="Nama item" bind:value={item.name} />
+								<div class="qty">
+									<input class="input" type="number" min="1" placeholder="Qty" bind:value={item.qty} />
+									<span class="mul">×</span>
+									<input class="input" type="number" min="0" placeholder="Harga satuan" bind:value={item.unit_price} />
+								</div>
+								<strong class="item-subtotal">{formatIDR(itemSubtotal(item))}</strong>
+								<button type="button" class="btn-mini" aria-label="Hapus item" onclick={() => removeItem(i)}>
+									<Icon name="trash" size={15} />
+								</button>
 							</div>
-							<button type="button" class="btn-mini" aria-label="Hapus item" onclick={() => removeItem(i)}>
-								<Icon name="trash" size={15} />
-							</button>
+							<div class="item-participant-heading">
+								<span>Ditanggung oleh</span>
+								<div class="participant-actions">
+									<button type="button" class="btn btn-ghost btn-mini" onclick={() => selectAllItemParticipants(item.id)} disabled={item.participant_ids.length === participants.length}>Pilih Semua</button>
+									<button type="button" class="btn btn-ghost btn-mini" onclick={() => clearItemParticipants(item.id)} disabled={item.participant_ids.length === 0}>Kosongkan</button>
+								</div>
+							</div>
+							<div class="item-participant-grid">
+								{#each participants as p (p.id)}
+									<label class="item-participant" class:selected={item.participant_ids.includes(p.id)}>
+										<input type="checkbox" checked={item.participant_ids.includes(p.id)} onchange={() => toggleItemParticipant(item.id, p.id)} />
+										<span>{p.display_name}</span>
+										<small>{participantSecondaryText(p)}</small>
+									</label>
+								{/each}
+							</div>
+							{#if item.participant_ids.length > 0 && itemSubtotal(item) > 0}
+								<div class="item-split-preview">
+									{#each item.participant_ids as participantId (participantId)}
+										<span>{participants.find((p) => p.id === participantId)?.display_name}: <strong>{formatIDR(itemShare(item, participantId))}</strong></span>
+									{/each}
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
 				<button type="button" class="btn-ghost btn-inline" onclick={addItem}>
 					<Icon name="plus" size={16} /> Tambah item
 				</button>
+				{#if participants.length > 0}
+					<div class="item-total-preview">
+						<strong>Total beban peserta</strong>
+						{#each participants as p (p.id)}
+							<span>{p.display_name}: <strong>{formatIDR(participantItemTotal(p.id))}</strong></span>
+						{/each}
+					</div>
+				{/if}
 			</fieldset>
 		{/if}
 
@@ -282,11 +445,13 @@ import { mapApiError } from '$lib/utils/errors';
 	}
 
 	.card {
-		max-width: 620px;
+		width: 100%;
+		max-width: none;
+		margin-inline: auto;
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
-		padding: 28px;
+		gap: 20px;
+		padding: clamp(24px, 3vw, 36px);
 		background: var(--surface);
 		border: 3px solid #000;
 		box-shadow: var(--shadow);
@@ -314,6 +479,28 @@ import { mapApiError } from '$lib/utils/errors';
 		margin: 0;
 		padding: 0;
 		border: none;
+	}
+
+	.amount-field {
+		max-width: 360px;
+	}
+
+	.compact-fields {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+		gap: 16px;
+	}
+
+	.split-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+		gap: 20px;
+		align-items: start;
+	}
+
+	.participant-panel,
+	.split-preview {
+		min-width: 0;
 	}
 
 	.field-label {
@@ -349,19 +536,170 @@ import { mapApiError } from '$lib/utils/errors';
 		color: #fff;
 	}
 
-	.check-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		gap: 8px;
-	}
-
-	.check {
+	.participant-heading {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		font-size: 14px;
-		color: var(--text-2);
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.participant-actions {
+		display: flex;
+		gap: 6px;
+	}
+
+	.participant-actions .btn-mini {
+		width: auto;
+		white-space: nowrap;
+		padding: 7px 10px;
+		font-size: 12px;
+	}
+
+	.participant-actions .btn-mini:disabled {
+		box-shadow: none;
+		opacity: 0.45;
+		cursor: not-allowed;
+		transform: none;
+	}
+
+	.participant-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+		gap: 10px;
+	}
+
+	.participant-card {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+		padding: 12px;
+		border: 2px solid var(--surface-2);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
 		cursor: pointer;
+		transition: border-color 0.12s ease, background 0.12s ease;
+	}
+
+	.participant-card:hover,
+	.participant-card.selected {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+	}
+
+	.participant-card input {
+		position: absolute;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.participant-copy,
+	.c-name {
+		min-width: 0;
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.participant-copy strong,
+	.c-name strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 14px;
+	}
+
+	.participant-copy small,
+	.c-name small {
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.participant-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border: 2px solid var(--muted);
+		border-radius: 6px;
+		color: transparent;
+	}
+
+	.participant-card.selected .participant-check {
+		border-color: #000;
+		background: var(--accent);
+		color: #000;
+	}
+
+	.split-preview {
+		margin-top: 4px;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+	}
+
+	.split-preview-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 10px;
+	}
+
+	.split-preview-head div,
+	.split-row span {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.split-preview-head span,
+	.split-row small {
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.split-preview-head > span {
+		padding: 5px 8px;
+		border-radius: 999px;
+		font-size: 12px;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.split-preview-head .total-ok {
+		background: #d8f8e7;
+		color: #146b42;
+	}
+
+	.split-preview-head .total-bad {
+		background: #ffe0e4;
+		color: #9b1c2b;
+	}
+
+	.split-rows {
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+	}
+
+	.split-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 8px 10px;
+		border-radius: 8px;
+		background: var(--surface);
+	}
+
+	.split-input {
+		width: 140px;
+		padding: 8px 10px;
+		text-align: right;
 	}
 
 	.custom-rows {
@@ -408,11 +746,115 @@ import { mapApiError } from '$lib/utils/errors';
 		gap: 10px;
 	}
 
+	.item-section-heading small {
+		display: block;
+		margin-top: 2px;
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.item-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+	}
+
 	.item-row {
 		display: grid;
-		grid-template-columns: 1.4fr 1fr 1.6fr auto;
+		grid-template-columns: minmax(180px, 1.3fr) minmax(220px, 1fr) auto auto;
 		gap: 8px;
 		align-items: center;
+	}
+
+	.item-subtotal {
+		white-space: nowrap;
+		font-size: 14px;
+	}
+
+	.item-participant-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.item-participant-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+		gap: 7px;
+	}
+
+	.item-participant {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		column-gap: 7px;
+		align-items: center;
+		padding: 8px 9px;
+		border: 2px solid transparent;
+		border-radius: 7px;
+		background: var(--surface);
+		cursor: pointer;
+	}
+
+	.item-participant.selected {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+	}
+
+	.item-participant input {
+		grid-row: span 2;
+	}
+
+	.item-participant span,
+	.item-participant small {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.item-participant span {
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.item-participant small {
+		color: var(--muted);
+		font-size: 11px;
+	}
+
+	.item-split-preview,
+	.item-total-preview {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 7px;
+		padding-top: 2px;
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.item-split-preview span,
+	.item-total-preview span {
+		padding: 4px 7px;
+		border-radius: 6px;
+		background: var(--surface);
+	}
+
+	.item-total-preview {
+		align-items: center;
+		padding: 12px;
+		border: 2px solid #000;
+		background: var(--surface-2);
+	}
+
+	.item-total-preview > strong {
+		margin-right: 4px;
+		color: var(--text);
 	}
 
 	.qty {
@@ -458,5 +900,75 @@ import { mapApiError } from '$lib/utils/errors';
 
 	.btn-inline {
 		width: auto;
+	}
+
+	@media (max-width: 900px) {
+		.split-layout {
+			grid-template-columns: 1fr;
+		}
+
+		.split-preview {
+			order: 2;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.expense-card {
+			padding: 20px 16px;
+		}
+
+		.compact-fields {
+			grid-template-columns: 1fr;
+		}
+
+		.amount-field {
+			max-width: none;
+		}
+
+		.participant-heading,
+		.split-preview-head {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.participant-actions {
+			width: 100%;
+		}
+
+		.participant-actions .btn {
+			flex: 1;
+		}
+
+		.participant-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.item-row {
+			grid-template-columns: 1fr auto;
+		}
+
+		.item-row .qty {
+			grid-column: 1 / -1;
+			grid-row: 2;
+		}
+
+		.item-subtotal {
+			grid-column: 1;
+			grid-row: 3;
+		}
+
+		.item-row > .btn-mini {
+			grid-column: 2;
+			grid-row: 3;
+		}
+
+		.item-participant-heading {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.split-preview-head > span {
+			white-space: normal;
+		}
 	}
 </style>

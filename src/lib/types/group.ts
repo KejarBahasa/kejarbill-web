@@ -5,6 +5,7 @@ export interface Participant {
 	user_id: string | null;
 	participant_type: 'registered' | 'guest';
 	display_name: string;
+	username?: string | null;
 	/** role keanggotaan dari group_members; null utk guest */
 	role?: GroupRole | null;
 	is_self: boolean;
@@ -28,6 +29,37 @@ export interface GroupSummary {
 	my_total_paid: number;
 	my_total_debt: number;
 	my_total_credit: number;
+}
+
+export type DebtStatus = 'unpaid' | 'partial' | 'paid';
+
+export interface MyDebtExpense {
+	expense_id: string;
+	title: string;
+	expense_date: string;
+	amount: number;
+	paid_amount: number;
+	remaining_amount: number;
+	status: DebtStatus;
+}
+
+export interface MyDebt {
+	to_participant: {
+		id: string;
+		display_name: string;
+	};
+	total_amount: number;
+	paid_amount: number;
+	remaining_amount: number;
+	status: DebtStatus;
+	expenses: MyDebtExpense[];
+}
+
+export interface MyDebtsResponse {
+	debts: MyDebt[];
+	total_amount: number;
+	paid_amount: number;
+	remaining_amount: number;
 }
 
 export type ActivityType = 'expense' | 'settlement';

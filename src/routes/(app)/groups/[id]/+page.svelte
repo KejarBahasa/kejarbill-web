@@ -64,7 +64,7 @@
 	<div class="alert alert-error" role="alert"><span>{error}</span></div>
 {:else if summary}
 	<div class="stats">
-		<a class="stat debt" href="/groups/{id}/settlements">
+		<a class="stat debt" href="/groups/{id}/debts">
 			<span class="stat-label">Tagihan Saya</span>
 			<strong class="stat-value">{formatIDR(summary.my_total_debt)}</strong>
 			<span class="stat-foot">{myDebts.length > 0 ? `ke ${myDebts.length} orang` : 'tidak ada utang 🎉'}</span>

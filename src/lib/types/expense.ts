@@ -27,6 +27,11 @@ export interface ExpenseItem {
 	qty: number;
 	unit_price: number;
 	subtotal: number;
+	participants: Array<{
+		participant_id: string;
+		display_name: string;
+		share_amount: number;
+	}>;
 }
 
 export interface ExpenseDetail extends ExpenseSummary {
@@ -69,7 +74,7 @@ export interface CreateItemizedExpenseRequest {
 	payer_participant_id: string;
 	items: Array<{
 		name: string;
-		participant_id: string;
+		participant_ids: string[];
 		notes?: string;
 		qty: number;
 		unit_price: number;
@@ -79,4 +84,3 @@ export interface CreateItemizedExpenseRequest {
 export interface ExpenseList {
 	expenses: ExpenseSummary[];
 }
-

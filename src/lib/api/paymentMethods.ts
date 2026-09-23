@@ -22,6 +22,14 @@ export function getRecipientPaymentMethods(groupId: string, participantId: strin
 	);
 }
 
+export function revealRecipientPaymentMethod(groupId: string, participantId: string, paymentMethodId: string) {
+	return api<{ account_number: string }>(
+		`/v1/groups/${groupId}/participants/${participantId}/payment-methods/${paymentMethodId}/reveal`,
+		{ method: 'POST' },
+		true
+	);
+}
+
 export function updatePaymentMethod(id: string, body: UpdatePaymentMethodRequest) {
 	return api<null>(`/v1/payment-methods/${id}`, { method: 'PATCH', body }, true);
 }

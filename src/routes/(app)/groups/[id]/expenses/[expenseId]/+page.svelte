@@ -94,8 +94,15 @@ import { mapApiError } from '$lib/utils/errors';
 				<ul class="rows">
 					{#each expense.items as it (it.id)}
 						<li>
-							<span>
-								{it.qty}× {it.name} <em>({formatIDR(it.unit_price)})</em>
+							<span class="item-detail">
+								<span>{it.qty}× {it.name} <em>({formatIDR(it.unit_price)})</em></span>
+								<small>
+									{#if it.participants.length === 1}
+										{it.participants[0].display_name}
+									{:else}
+										Bersama: {it.participants.map((p) => p.display_name).join(', ')}
+									{/if}
+								</small>
 							</span>
 							<strong>{formatIDR(it.subtotal)}</strong>
 						</li>
@@ -223,5 +230,16 @@ import { mapApiError } from '$lib/utils/errors';
 		color: var(--muted);
 		font-style: normal;
 		font-size: 13px;
+	}
+
+	.item-detail {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.item-detail small {
+		color: var(--muted);
+		font-size: 12px;
 	}
 </style>
