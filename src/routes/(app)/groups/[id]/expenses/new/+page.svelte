@@ -4,7 +4,7 @@
 	import { getGroupParticipants } from '$lib/api/groups';
 	import { createEqualExpense, createCustomExpense, createItemizedExpense } from '$lib/api/expenses';
 	import { mapApiError } from '$lib/utils/errors';
-	import { formatJakartaDateTimeInput, jakartaInputToISO } from '$lib/utils/format';
+	import { formatIDR, formatJakartaDateTimeInput, jakartaInputToISO } from '$lib/utils/format';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { Participant } from '$lib/types/group';
 	import { goto } from '$app/navigation';
@@ -23,6 +23,8 @@
 	let participants = $state<Participant[]>([]);
 	let selected = $state<Record<string, boolean>>({});
 	let customShares = $state<Record<string, number>>({});
+	let equalShares = $state<Record<string, number>>({});
+	let equalSharesEdited = $state(false);
 	let items = $state<Array<{ name: string; participant_id: string; qty: number; unit_price: number; notes: string }>>([
 		{ name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }
 	]);
@@ -50,10 +52,53 @@
 
 	function toggleParticipant(pid: string) {
 		selected[pid] = !selected[pid];
+		resetEqualShares();
+	}
+
+	function selectAllParticipants() {
+		selected = Object.fromEntries(participants.map((p) => [p.id, true]));
+		resetEqualShares();
+	}
+
+	function clearParticipants() {
+		selected = {};
+		resetEqualShares();
 	}
 
 	function selectedIds() {
 		return Object.entries(selected).filter(([, v]) => v).map(([pid]) => pid);
+	}
+
+	function resetEqualShares() {
+		equalShares = {};
+		equalSharesEdited = false;
+	}
+
+	function defaultEqualShares() {
+		const ids = selectedIds();
+		if (!ids.length) return {};
+		const base = Math.floor((Number(total_amount) || 0) / ids.length);
+		const remainder = (Number(total_amount) || 0) % ids.length;
+		return Object.fromEntries(ids.map((pid, index) => [pid, base + (index < remainder ? 1 : 0)]));
+	}
+
+	function equalShareFor(pid: string) {
+		return equalSharesEdited ? Number(equalShares[pid] ?? 0) : Number(defaultEqualShares()[pid] ?? 0);
+	}
+
+	function editEqualShare(pid: string, value: string) {
+		if (!equalSharesEdited) equalShares = defaultEqualShares();
+		equalSharesEdited = true;
+		equalShares[pid] = Number(value) || 0;
+	}
+
+	function equalShareTotal() {
+		return selectedIds().reduce((sum, pid) => sum + equalShareFor(pid), 0);
+	}
+
+	function participantSecondaryText(p: Participant) {
+		if (p.username) return `@${p.username}`;
+		return p.participant_type === 'guest' ? 'Tamu' : 'Akun terdaftar';
 	}
 
 	function addItem() {
@@ -99,12 +144,20 @@
 					loading = false;
 					return;
 				}
-				if (total_amount % ids.length !== 0) {
-					error = `Total harus habis dibagi ${ids.length} peserta (Rp${total_amount.toLocaleString('id-ID')} tidak pas).`;
+				if (equalSharesEdited && equalShareTotal() !== Number(total_amount)) {
+					error = `Total pembagian harus sama dengan ${formatIDR(Number(total_amount))}.`;
 					loading = false;
 					return;
 				}
-				await createEqualExpense({ ...common, participant_ids: ids, total_amount });
+				const needsExplicitShares = equalSharesEdited || Number(total_amount) % ids.length !== 0;
+				if (needsExplicitShares) {
+					await createCustomExpense({
+						...common,
+						participants: ids.map((pid) => ({ participant_id: pid, share_amount: equalShareFor(pid) }))
+					});
+				} else {
+					await createEqualExpense({ ...common, participant_ids: ids, total_amount });
+				}
 			} else if (mode === 'custom') {
 				const shares = Object.entries(customShares)
 					.filter(([pid]) => selected[pid])
@@ -181,7 +234,7 @@
 			<span class="field-label">Dibayar oleh</span>
 			<select class="input" bind:value={payer_participant_id}>
 				{#each participants as p (p.id)}
-					<option value={p.id}>{p.display_name}</option>
+					<option value={p.id}>{p.display_name}{p.username ? ` (@${p.username})` : p.participant_type === 'guest' ? ' (tamu)' : ''}</option>
 				{/each}
 			</select>
 		</fieldset>
@@ -189,27 +242,58 @@
 		{#if mode === 'equal'}
 			<label class="field">
 				<span class="field-label">Total ({currency})</span>
-				<input class="input" type="number" min="0" bind:value={total_amount} />
+				<input class="input" type="number" min="0" bind:value={total_amount} oninput={resetEqualShares} />
 			</label>
 			<fieldset class="field-group">
-				<span class="field-label">Dibagi ke peserta</span>
-				<div class="check-grid">
+				<div class="participant-heading">
+					<span class="field-label">Dibagi ke peserta</span>
+					<div class="participant-actions">
+						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants}>Pilih semua</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants}>Kosongkan</button>
+					</div>
+				</div>
+				<div class="participant-grid">
 					{#each participants as p (p.id)}
-						<label class="check">
+						<label class="participant-card" class:selected={!!selected[p.id]}>
 							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
-							<span>{p.display_name}</span>
+							<span class="participant-copy"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+							<span class="participant-check"><Icon name="check-circle" size={15} /></span>
 						</label>
 					{/each}
 				</div>
+				{#if selectedIds().length > 0}
+					<div class="split-preview">
+						<div class="split-preview-head">
+							<div><strong>Preview pembagian</strong><span>Nominal awal dibagi rata, lalu bisa disesuaikan.</span></div>
+							<span class:total-ok={equalShareTotal() === Number(total_amount)} class:total-bad={equalShareTotal() !== Number(total_amount)}>
+								{equalShareTotal() === Number(total_amount) ? `Total sesuai ${formatIDR(Number(total_amount))}` : `Selisih ${formatIDR(Math.abs(Number(total_amount) - equalShareTotal()))}`}
+							</span>
+						</div>
+						<div class="split-rows">
+							{#each participants.filter((p) => selected[p.id]) as p (p.id)}
+								<label class="split-row">
+									<span><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+									<input class="input split-input" type="number" min="0" value={equalShareFor(p.id)} oninput={(event) => editEqualShare(p.id, event.currentTarget.value)} />
+								</label>
+							{/each}
+						</div>
+					</div>
+				{/if}
 			</fieldset>
 		{:else if mode === 'custom'}
 			<fieldset class="field-group">
-				<span class="field-label">Peserta & pembagian</span>
+				<div class="participant-heading">
+					<span class="field-label">Peserta & pembagian</span>
+					<div class="participant-actions">
+						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants}>Pilih semua</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants}>Kosongkan</button>
+					</div>
+				</div>
 				<div class="custom-rows">
 					{#each participants as p (p.id)}
 						{#if selected[p.id]}
 							<div class="custom-row">
-								<span class="c-name">{p.display_name}</span>
+								<span class="c-name"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
 								<div class="c-input-wrap">
 									<span class="c-cur">{currency}</span>
 									<input class="input c-input" type="number" min="0" placeholder="0" bind:value={customShares[p.id]} />
@@ -218,11 +302,12 @@
 						{/if}
 					{/each}
 				</div>
-				<div class="check-grid">
+				<div class="participant-grid">
 					{#each participants as p (p.id)}
-						<label class="check">
+						<label class="participant-card" class:selected={!!selected[p.id]}>
 							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
-							<span>{p.display_name}</span>
+							<span class="participant-copy"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+							<span class="participant-check"><Icon name="check-circle" size={15} /></span>
 						</label>
 					{/each}
 				</div>
@@ -351,19 +436,161 @@
 		color: #fff;
 	}
 
-	.check-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		gap: 8px;
-	}
-
-	.check {
+	.participant-heading {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		font-size: 14px;
-		color: var(--text-2);
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.participant-actions {
+		display: flex;
+		gap: 6px;
+	}
+
+	.participant-actions .btn-mini {
+		padding: 7px 10px;
+		font-size: 12px;
+	}
+
+	.participant-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+		gap: 10px;
+	}
+
+	.participant-card {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+		padding: 12px;
+		border: 2px solid var(--surface-2);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
 		cursor: pointer;
+		transition: border-color 0.12s ease, background 0.12s ease;
+	}
+
+	.participant-card:hover,
+	.participant-card.selected {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+	}
+
+	.participant-card input {
+		position: absolute;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.participant-copy,
+	.c-name {
+		min-width: 0;
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.participant-copy strong,
+	.c-name strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 14px;
+	}
+
+	.participant-copy small,
+	.c-name small {
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.participant-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border: 2px solid var(--muted);
+		border-radius: 6px;
+		color: transparent;
+	}
+
+	.participant-card.selected .participant-check {
+		border-color: #000;
+		background: var(--accent);
+		color: #000;
+	}
+
+	.split-preview {
+		margin-top: 4px;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+	}
+
+	.split-preview-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 10px;
+	}
+
+	.split-preview-head div,
+	.split-row span {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.split-preview-head span,
+	.split-row small {
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.split-preview-head > span {
+		padding: 5px 8px;
+		border-radius: 999px;
+		font-size: 12px;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.split-preview-head .total-ok {
+		background: #d8f8e7;
+		color: #146b42;
+	}
+
+	.split-preview-head .total-bad {
+		background: #ffe0e4;
+		color: #9b1c2b;
+	}
+
+	.split-rows {
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+	}
+
+	.split-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 8px 10px;
+		border-radius: 8px;
+		background: var(--surface);
+	}
+
+	.split-input {
+		width: 140px;
+		padding: 8px 10px;
+		text-align: right;
 	}
 
 	.custom-rows {

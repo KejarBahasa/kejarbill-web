@@ -5,6 +5,7 @@ export interface Participant {
 	user_id: string | null;
 	participant_type: 'registered' | 'guest';
 	display_name: string;
+	username?: string | null;
 	/** role keanggotaan dari group_members; null utk guest */
 	role?: GroupRole | null;
 	is_self: boolean;
