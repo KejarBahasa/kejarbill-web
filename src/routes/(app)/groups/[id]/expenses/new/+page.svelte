@@ -25,8 +25,8 @@
 	let customShares = $state<Record<string, number>>({});
 	let equalShares = $state<Record<string, number>>({});
 	let equalSharesEdited = $state(false);
-	let items = $state<Array<{ id: string; name: string; participant_id: string; qty: number; unit_price: number; notes: string }>>([
-		{ id: crypto.randomUUID(), name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }
+	let items = $state<Array<{ id: string; name: string; participant_ids: string[]; qty: number; unit_price: number; notes: string }>>([
+		{ id: crypto.randomUUID(), name: '', participant_ids: [], qty: 1, unit_price: 0, notes: '' }
 	]);
 	let loading = $state(true);
 	let error = $state('');
@@ -105,11 +105,49 @@
 	const allParticipantsSelected = $derived(participants.length > 0 && selectedCount === participants.length);
 
 	function addItem() {
-		items = [...items, { id: crypto.randomUUID(), name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }];
+		items = [...items, { id: crypto.randomUUID(), name: '', participant_ids: [], qty: 1, unit_price: 0, notes: '' }];
 	}
 
 	function removeItem(i: number) {
 		items = items.filter((_, idx) => idx !== i);
+	}
+
+	function toggleItemParticipant(itemId: string, participantId: string) {
+		items = items.map((item) => {
+			if (item.id !== itemId) return item;
+			const selected = item.participant_ids.includes(participantId);
+			return {
+				...item,
+				participant_ids: selected
+					? item.participant_ids.filter((id) => id !== participantId)
+					: [...item.participant_ids, participantId]
+			};
+		});
+	}
+
+	function selectAllItemParticipants(itemId: string) {
+		items = items.map((item) => item.id === itemId ? { ...item, participant_ids: participants.map((p) => p.id) } : item);
+	}
+
+	function clearItemParticipants(itemId: string) {
+		items = items.map((item) => item.id === itemId ? { ...item, participant_ids: [] } : item);
+	}
+
+	function itemSubtotal(item: (typeof items)[number]) {
+		return (Number(item.qty) || 0) * (Number(item.unit_price) || 0);
+	}
+
+	function itemShare(item: (typeof items)[number], participantId: string) {
+		const index = item.participant_ids.indexOf(participantId);
+		if (index < 0 || item.participant_ids.length === 0) return 0;
+		const subtotal = itemSubtotal(item);
+		const base = Math.floor(subtotal / item.participant_ids.length);
+		const remainder = subtotal % item.participant_ids.length;
+		return base + (index < remainder ? 1 : 0);
+	}
+
+	function participantItemTotal(participantId: string) {
+		return items.reduce((sum, item) => sum + itemShare(item, participantId), 0);
 	}
 
 	function validateCommon(): string {
@@ -172,14 +210,14 @@
 				}
 				await createCustomExpense({ ...common, participants: shares });
 			} else {
-				if (items.some((it) => !it.name.trim() || !it.participant_id || it.qty <= 0 || it.unit_price <= 0)) {
-					error = 'Lengkapi semua item (nama, peserta, qty, harga).';
+				if (items.some((it) => !it.name.trim() || it.participant_ids.length < 1 || it.qty <= 0 || it.unit_price <= 0)) {
+					error = 'Lengkapi semua item (nama, minimal satu peserta, qty, harga).';
 					loading = false;
 					return;
 				}
 				await createItemizedExpense({
 					...common,
-					items: items.map((it) => ({ name: it.name.trim(), participant_id: it.participant_id, qty: it.qty, unit_price: it.unit_price, notes: it.notes.trim() || undefined }))
+					items: items.map((it) => ({ name: it.name.trim(), participant_ids: it.participant_ids, qty: it.qty, unit_price: it.unit_price, notes: it.notes.trim() || undefined }))
 				});
 			}
 			toast.success('Expense disimpan.');
@@ -322,31 +360,61 @@
 			</fieldset>
 		{:else}
 			<fieldset class="field-group">
-				<span class="field-label">Item</span>
+				<div class="item-section-heading">
+					<div><span class="field-label">Item belanja</span><small>Atur siapa saja yang ikut menanggung tiap item.</small></div>
+				</div>
 				<div class="items">
 					{#each items as item, i (item.id)}
-						<div class="item-row">
-							<input class="input" type="text" placeholder="Nama item" bind:value={item.name} />
-							<select class="input" bind:value={item.participant_id}>
-								<option value="" disabled>Peserta</option>
-								{#each participants as p (p.id)}
-									<option value={p.id}>{p.display_name}</option>
-								{/each}
-							</select>
-							<div class="qty">
-								<input class="input" type="number" min="1" placeholder="Qty" bind:value={item.qty} />
-								<span class="mul">×</span>
-								<input class="input" type="number" min="0" placeholder="Harga" bind:value={item.unit_price} />
+						<div class="item-card">
+							<div class="item-row">
+								<input class="input" type="text" placeholder="Nama item" bind:value={item.name} />
+								<div class="qty">
+									<input class="input" type="number" min="1" placeholder="Qty" bind:value={item.qty} />
+									<span class="mul">×</span>
+									<input class="input" type="number" min="0" placeholder="Harga satuan" bind:value={item.unit_price} />
+								</div>
+								<strong class="item-subtotal">{formatIDR(itemSubtotal(item))}</strong>
+								<button type="button" class="btn-mini" aria-label="Hapus item" onclick={() => removeItem(i)}>
+									<Icon name="trash" size={15} />
+								</button>
 							</div>
-							<button type="button" class="btn-mini" aria-label="Hapus item" onclick={() => removeItem(i)}>
-								<Icon name="trash" size={15} />
-							</button>
+							<div class="item-participant-heading">
+								<span>Ditanggung oleh</span>
+								<div class="participant-actions">
+									<button type="button" class="btn btn-ghost btn-mini" onclick={() => selectAllItemParticipants(item.id)} disabled={item.participant_ids.length === participants.length}>Pilih Semua</button>
+									<button type="button" class="btn btn-ghost btn-mini" onclick={() => clearItemParticipants(item.id)} disabled={item.participant_ids.length === 0}>Kosongkan</button>
+								</div>
+							</div>
+							<div class="item-participant-grid">
+								{#each participants as p (p.id)}
+									<label class="item-participant" class:selected={item.participant_ids.includes(p.id)}>
+										<input type="checkbox" checked={item.participant_ids.includes(p.id)} onchange={() => toggleItemParticipant(item.id, p.id)} />
+										<span>{p.display_name}</span>
+										<small>{participantSecondaryText(p)}</small>
+									</label>
+								{/each}
+							</div>
+							{#if item.participant_ids.length > 0 && itemSubtotal(item) > 0}
+								<div class="item-split-preview">
+									{#each item.participant_ids as participantId (participantId)}
+										<span>{participants.find((p) => p.id === participantId)?.display_name}: <strong>{formatIDR(itemShare(item, participantId))}</strong></span>
+									{/each}
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
 				<button type="button" class="btn-ghost btn-inline" onclick={addItem}>
 					<Icon name="plus" size={16} /> Tambah item
 				</button>
+				{#if participants.length > 0}
+					<div class="item-total-preview">
+						<strong>Total beban peserta</strong>
+						{#each participants as p (p.id)}
+							<span>{p.display_name}: <strong>{formatIDR(participantItemTotal(p.id))}</strong></span>
+						{/each}
+					</div>
+				{/if}
 			</fieldset>
 		{/if}
 
@@ -678,11 +746,115 @@
 		gap: 10px;
 	}
 
+	.item-section-heading small {
+		display: block;
+		margin-top: 2px;
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.item-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+	}
+
 	.item-row {
 		display: grid;
-		grid-template-columns: 1.4fr 1fr 1.6fr auto;
+		grid-template-columns: minmax(180px, 1.3fr) minmax(220px, 1fr) auto auto;
 		gap: 8px;
 		align-items: center;
+	}
+
+	.item-subtotal {
+		white-space: nowrap;
+		font-size: 14px;
+	}
+
+	.item-participant-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.item-participant-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+		gap: 7px;
+	}
+
+	.item-participant {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		column-gap: 7px;
+		align-items: center;
+		padding: 8px 9px;
+		border: 2px solid transparent;
+		border-radius: 7px;
+		background: var(--surface);
+		cursor: pointer;
+	}
+
+	.item-participant.selected {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+	}
+
+	.item-participant input {
+		grid-row: span 2;
+	}
+
+	.item-participant span,
+	.item-participant small {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.item-participant span {
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.item-participant small {
+		color: var(--muted);
+		font-size: 11px;
+	}
+
+	.item-split-preview,
+	.item-total-preview {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 7px;
+		padding-top: 2px;
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.item-split-preview span,
+	.item-total-preview span {
+		padding: 4px 7px;
+		border-radius: 6px;
+		background: var(--surface);
+	}
+
+	.item-total-preview {
+		align-items: center;
+		padding: 12px;
+		border: 2px solid #000;
+		background: var(--surface-2);
+	}
+
+	.item-total-preview > strong {
+		margin-right: 4px;
+		color: var(--text);
 	}
 
 	.qty {
@@ -769,6 +941,30 @@
 
 		.participant-grid {
 			grid-template-columns: 1fr;
+		}
+
+		.item-row {
+			grid-template-columns: 1fr auto;
+		}
+
+		.item-row .qty {
+			grid-column: 1 / -1;
+			grid-row: 2;
+		}
+
+		.item-subtotal {
+			grid-column: 1;
+			grid-row: 3;
+		}
+
+		.item-row > .btn-mini {
+			grid-column: 2;
+			grid-row: 3;
+		}
+
+		.item-participant-heading {
+			align-items: flex-start;
+			flex-direction: column;
 		}
 
 		.split-preview-head > span {
