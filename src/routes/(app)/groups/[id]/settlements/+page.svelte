@@ -3,7 +3,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { getGroupBalances, getGroupParticipants } from '$lib/api/groups';
 	import { getGroupSettlements, createSettlement } from '$lib/api/settlements';
-	import { getRecipientPaymentMethods } from '$lib/api/paymentMethods';
+	import { getRecipientPaymentMethods, revealRecipientPaymentMethod } from '$lib/api/paymentMethods';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { mapApiError } from '$lib/utils/errors';
 	import { formatIDR, formatDateShort, jakartaInputToISO } from '$lib/utils/format';
@@ -34,7 +34,14 @@
 	let notes = $state('');
 	let paid_at = $state(new Date().toISOString().slice(0, 10));
 	let submitting = $state(false);
+	let copyingMethodId = $state('');
+	let revealingMethodId = $state('');
+	let revealedAccounts = $state<Record<string, { accountNumber: string; expiresAt: number }>>({});
+	let showPaymentModal = $state(false);
+	let paymentMethodsReload = $state(0);
 	let idemKey = $state(crypto.randomUUID());
+	const revealTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	const revealTtlMs = 5 * 60 * 1000;
 
 	const methodOptions = $derived(
 		payment_channel === 'cash'
@@ -48,12 +55,6 @@
 
 	const selfP = $derived(participants.find((p) => p.is_self));
 	const canManage = $derived(selfP?.role === 'owner' || selfP?.role === 'admin');
-
-	/** yang boleh dicatat settlement-nya oleh user ini: dirinya sendiri + (khusus owner/admin) para tamu */
-	const fromOptions = $derived([
-		...(selfP ? [selfP] : []),
-		...(canManage ? participants.filter((p) => p.participant_type === 'guest') : [])
-	]);
 
 	const payableBalances = $derived(
 		balances
@@ -111,7 +112,27 @@
 		from_participant_id = balance.from_participant.id;
 		to_participant_id = balance.to_participant.id;
 		amount = balance.amount;
-		document.getElementById('settlement-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		payment_channel = 'bank_transfer';
+		payment_method_id = '';
+		clearRevealedAccounts();
+		revealingMethodId = '';
+		notes = '';
+		paid_at = new Date().toISOString().slice(0, 10);
+		error = '';
+		paymentMethodsReload += 1;
+		showPaymentModal = true;
+	}
+
+	function closePaymentModal() {
+		if (submitting) return;
+		showPaymentModal = false;
+		error = '';
+		clearRevealedAccounts();
+		revealingMethodId = '';
+	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && showPaymentModal) closePaymentModal();
 	}
 
 	$effect(() => {
@@ -121,14 +142,25 @@
 	// muat metode pembayaran penerima saat channel non-cash atau penerima berubah
 	$effect(() => {
 		const recipient = to_participant_id;
+		const reload = paymentMethodsReload;
+		void reload;
 		if (payment_channel === 'cash' || !recipient) {
 			recipientMethods = [];
 			return;
 		}
 		loadingMethods = true;
 		payment_method_id = '';
+		clearRevealedAccounts();
+		revealingMethodId = '';
 		getRecipientPaymentMethods(id, recipient)
-			.then((res) => (recipientMethods = res.payment_methods))
+			.then((res) => {
+				recipientMethods = res.payment_methods;
+				const expectedType = payment_channel === 'bank_transfer' ? 'bank' : 'ewallet';
+				const defaultMethod = res.payment_methods.find(
+					(method) => method.is_default && method.method_type === expectedType
+				);
+				payment_method_id = defaultMethod?.id ?? '';
+			})
 			.catch(() => (recipientMethods = []))
 			.finally(() => (loadingMethods = false));
 	});
@@ -146,8 +178,53 @@
 		}
 	}
 
+	async function revealAccountNumber(method: PaymentMethodSummary) {
+		revealingMethodId = method.id;
+		try {
+			const { account_number } = await revealRecipientPaymentMethod(id, to_participant_id, method.id);
+			if (revealTimers.has(method.id)) clearTimeout(revealTimers.get(method.id));
+			const expiresAt = Date.now() + revealTtlMs;
+			revealedAccounts = { ...revealedAccounts, [method.id]: { accountNumber: account_number, expiresAt } };
+			revealTimers.set(method.id, setTimeout(() => {
+				if (revealedAccounts[method.id]?.expiresAt !== expiresAt) return;
+				const next = { ...revealedAccounts };
+				delete next[method.id];
+				revealedAccounts = next;
+				revealTimers.delete(method.id);
+			}, revealTtlMs));
+			payment_method_id = method.id;
+		} catch (err) {
+			error = mapApiError(err, 'Nomor rekening tidak dapat ditampilkan.');
+		} finally {
+			revealingMethodId = '';
+		}
+	}
+
+	async function copyAccountNumber(method: PaymentMethodSummary) {
+		const revealed = revealedAccounts[method.id];
+		if (!revealed) return;
+		copyingMethodId = method.id;
+		try {
+			await navigator.clipboard.writeText(revealed.accountNumber);
+			toast.success('Nomor rekening disalin.');
+		} catch {
+			error = 'Nomor rekening tidak dapat disalin oleh browser ini.';
+		} finally {
+			copyingMethodId = '';
+		}
+	}
+
 	function pickChannel(c: PaymentChannel) {
 		payment_channel = c;
+		payment_method_id = '';
+		clearRevealedAccounts();
+		revealingMethodId = '';
+	}
+
+	function clearRevealedAccounts() {
+		for (const timer of revealTimers.values()) clearTimeout(timer);
+		revealTimers.clear();
+		revealedAccounts = {};
 	}
 
 	async function handleSubmit() {
@@ -180,6 +257,7 @@
 			idemKey = crypto.randomUUID();
 			toast.success('Settlement berhasil dicatat.');
 			await load();
+			showPaymentModal = false;
 		} catch (err) {
 			error = mapApiError(err, 'Gagal mencatat settlement.');
 		} finally {
@@ -191,6 +269,8 @@
 <svelte:head>
 	<title>Settlement — KejarBill</title>
 </svelte:head>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="cols">
 		<section class="block">
@@ -261,104 +341,114 @@
 		{/if}
 	</section>
 
-	<section class="block">
-		<h2 class="block-title">{selectedPayee ? `Bayar kepada ${selectedPayee.display_name}` : 'Catat Settlement'}</h2>
-		{#if selectedPayee}
-			<p class="form-context">
-				{selectedPayer?.participant_type === 'guest' ? `${selectedPayer.display_name} membayar` : 'Kamu membayar'}
-				<strong>{selectedPayee.display_name}</strong>. Nominal di bawah otomatis mengikuti seluruh utang dan masih bisa diubah untuk pembayaran sebagian.
-			</p>
-		{/if}
-		{#if error}
-			<div class="alert alert-error" role="alert">
-				<span class="alert-icon"><Icon name="alert" size={17} /></span>
-				<span>{error}</span>
-			</div>
-		{/if}
-		<form id="settlement-form" class="form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-			{#if fromOptions.length > 1}
-				<label class="field">
-					<span class="field-label">Dibayar oleh</span>
-					<select class="input" bind:value={from_participant_id}>
-						{#each fromOptions as p (p.id)}
-							<option value={p.id}>
-								{p.display_name}{p.is_self ? ' (kamu)' : p.participant_type === 'guest' ? ' — tamu' : ''}
-							</option>
-						{/each}
-					</select>
-					<span class="hint muted">Kamu hanya bisa mencatat pembayaran untuk diri sendiri dan tamu grup.</span>
-				</label>
-			{:else}
-				<div class="field">
-					<span class="field-label">Dibayar oleh</span>
-					<span class="chip">{selfP?.display_name ?? '—'} (kamu)</span>
+</div>
+
+{#if showPaymentModal}
+	<div class="modal-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && closePaymentModal()}>
+		<dialog open class="payment-modal" aria-labelledby="payment-modal-title">
+			<div class="modal-head">
+				<div>
+					<span class="modal-kicker">Catat pelunasan</span>
+					<h2 id="payment-modal-title">Tandai sudah dibayar</h2>
 				</div>
-			{/if}
+				<button class="modal-close" type="button" aria-label="Tutup" onclick={closePaymentModal} disabled={submitting}>
+					<Icon name="x" size={19} />
+				</button>
+			</div>
 
-			<label class="field">
-				<span class="field-label">Dibayar kepada</span>
-				<select class="input" bind:value={to_participant_id}>
-					{#each participants.filter((p) => p.id !== from_participant_id) as p (p.id)}
-						<option value={p.id}>{p.display_name}</option>
-					{/each}
-				</select>
-			</label>
+			<div class="payment-route">
+				<div><span>{selectedPayer?.participant_type === 'guest' ? 'Tamu' : 'Dari'}</span><strong>{selectedPayer?.display_name ?? '—'}</strong></div>
+				<Icon name="arrow-right" size={18} />
+				<div><span>Kepada</span><strong>{selectedPayee?.display_name ?? '—'}</strong></div>
+			</div>
 
-			<div class="grid2">
+			<div class="locked-amount">
+				<span>Total yang dicatat</span>
+				<strong>{formatIDR(amount)}</strong>
+				<small>Nominal penuh dari saldo utang. Pembayaran sebagian belum dicatat di flow ini.</small>
+			</div>
+
+			<form class="modal-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 				<label class="field">
-					<span class="field-label">Jumlah yang dibayar (IDR)</span>
-					<input class="input" type="number" min="0" bind:value={amount} />
-					<span class="hint muted">Nominal penuh terisi otomatis, tetapi boleh diubah untuk bayar sebagian.</span>
-				</label>
-				<label class="field">
-					<span class="field-label">Tanggal</span>
+					<span class="field-label">Tanggal pembayaran</span>
 					<input class="input" type="date" bind:value={paid_at} />
 				</label>
-			</div>
 
-			<fieldset class="field-group">
-				<span class="field-label">Saluran bayar</span>
-				<div class="segmented">
-					{#each ([['cash', 'Tunai'], ['bank_transfer', 'Transfer'], ['ewallet', 'E-Wallet']]) as [c, label] (c)}
-						<button type="button" class:active={payment_channel === c} onclick={() => pickChannel(c as PaymentChannel)}>{label}</button>
-					{/each}
-				</div>
-			</fieldset>
-
-			{#if payment_channel !== 'cash'}
-				<label class="field">
-					<span class="field-label">Metode pembayaran penerima</span>
-					<select class="input" bind:value={payment_method_id} disabled={loadingMethods}>
-						<option value="" disabled>{loadingMethods ? 'Memuat…' : 'Pilih metode…'}</option>
-						{#each methodOptions as m (m.id)}
-							<option value={m.id}>{m.provider_name}{m.masked_account_number ? ` (${m.masked_account_number})` : ''}</option>
+				<fieldset class="field-group">
+					<span class="field-label">Cara pembayaran</span>
+					<div class="segmented">
+						{#each ([['bank_transfer', 'Transfer'], ['ewallet', 'E-Wallet'], ['cash', 'Tunai']]) as [c, label] (c)}
+							<button type="button" class:active={payment_channel === c} onclick={() => pickChannel(c as PaymentChannel)}>{label}</button>
 						{/each}
-					</select>
+					</div>
+				</fieldset>
+
+				{#if payment_channel !== 'cash'}
+					<div class="method-section">
+						<span class="field-label">Pilih metode pembayaran</span>
+						{#if loadingMethods}
+							<p class="hint muted">Memuat metode pembayaran penerima…</p>
+						{:else if methodOptions.length > 0}
+							<div class="method-options">
+								{#each methodOptions as m (m.id)}
+									<div
+										class="method-option-row"
+										class:selected={payment_method_id === m.id}
+										role="button"
+										tabindex="0"
+										aria-pressed={payment_method_id === m.id}
+										onclick={() => (payment_method_id = m.id)}
+										onkeydown={(event) => {
+											if (event.key === 'Enter' || event.key === ' ') {
+												event.preventDefault();
+												payment_method_id = m.id;
+											}
+										}}
+									>
+										<div class="method-option">
+											<strong>{m.provider_name}</strong>
+											<span>{m.account_name}</span>
+											<span class="account-number">{revealedAccounts[m.id]?.accountNumber ?? m.masked_account_number ?? 'Metode penerima'}</span>
+										</div>
+										<div class="method-actions">
+											{#if revealedAccounts[m.id]}
+												<button type="button" class="btn-mini copy-method" onclick={(event) => { event.stopPropagation(); copyAccountNumber(m); }} disabled={copyingMethodId === m.id} aria-label="Salin nomor rekening" title="Salin nomor rekening">
+													{#if copyingMethodId === m.id}<span class="spinner"></span>{:else}<Icon name="copy" size={15} />{/if}
+												</button>
+											{:else}
+													<button type="button" class="btn-mini reveal-method" onclick={(event) => { event.stopPropagation(); revealAccountNumber(m); }} disabled={revealingMethodId === m.id} aria-label="Tampilkan nomor rekening" title="Tampilkan nomor rekening">
+														{#if revealingMethodId === m.id}<span class="spinner"></span>{:else}<Icon name="eye" size={16} />{/if}
+													</button>
+											{/if}
+										</div>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<p class="hint muted">Penerima belum membagikan metode {payment_channel === 'bank_transfer' ? 'bank' : 'e-wallet'} yang terlihat untukmu.</p>
+						{/if}
+					</div>
+				{/if}
+
+				<label class="field">
+					<span class="field-label">Catatan (opsional)</span>
+					<input class="input" type="text" placeholder="cth: Sudah transfer BCA" bind:value={notes} />
 				</label>
-				{#if loadingMethods}
-					<p class="hint muted">Memuat metode pembayaran penerima…</p>
-				{:else if methodOptions.length === 0}
-					<p class="hint muted">
-						Penerima belum membagikan metode {payment_channel === 'bank_transfer' ? 'bank' : 'e-wallet'} yang terlihat untukmu.
-					</p>
-				{/if}
-			{/if}
 
-			<label class="field">
-				<span class="field-label">Catatan (opsional)</span>
-				<input class="input" type="text" placeholder="cth: Transfer BCA" bind:value={notes} />
-			</label>
-
-			<button class="btn btn-primary" type="submit" disabled={submitting}>
-				{#if submitting}
-					<span class="spinner"></span> Menyimpan…
-				{:else}
-					Simpan <Icon name="arrow-right" size={17} />
+				{#if error}
+					<div class="alert alert-error" role="alert"><span class="alert-icon"><Icon name="alert" size={17} /></span><span>{error}</span></div>
 				{/if}
-			</button>
-		</form>
-	</section>
-</div>
+
+				<div class="modal-actions">
+					<button class="btn btn-ghost" type="button" onclick={closePaymentModal} disabled={submitting}>Batal</button>
+					<button class="btn btn-primary" type="submit" disabled={submitting}>
+						{#if submitting}<span class="spinner"></span> Menyimpan…{:else}<Icon name="check-circle" size={17} /> Tandai sudah dibayar{/if}
+					</button>
+				</div>
+			</form>
+		</dialog>
+	</div>
+{/if}
 
 <style>
 	.cols {
@@ -548,29 +638,6 @@
 		white-space: nowrap;
 	}
 
-	.form {
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-	}
-
-	.form-context {
-		margin: -6px 0 16px;
-		font-size: 13px;
-		line-height: 1.5;
-		color: var(--muted);
-	}
-
-	.form-context strong {
-		color: var(--text);
-	}
-
-	.grid2 {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 10px;
-	}
-
 	.field-group {
 		display: flex;
 		flex-direction: column;
@@ -631,9 +698,242 @@
 		font-size: 13px;
 	}
 
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 24px;
+		background: rgba(0, 0, 0, 0.48);
+	}
+
+	.payment-modal {
+		width: min(560px, 100%);
+		max-height: min(760px, calc(100dvh - 48px));
+		overflow-y: auto;
+		padding: 24px;
+		background: var(--surface);
+		border: 3px solid #000;
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
+	}
+
+	.modal-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 18px;
+	}
+
+	.modal-kicker {
+		display: block;
+		margin-bottom: 4px;
+		color: var(--muted);
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	.modal-head h2 {
+		font-size: 20px;
+	}
+
+	.modal-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 7px;
+		border: 2px solid #000;
+		border-radius: 8px;
+		background: var(--surface);
+		color: var(--text);
+	}
+
+	.modal-close:hover {
+		background: var(--surface-2);
+	}
+
+	.payment-route {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+	}
+
+	.payment-route > div {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.payment-route span,
+	.locked-amount span,
+	.locked-amount small {
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.payment-route strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 14px;
+	}
+
+	.locked-amount {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		margin: 16px 0;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--accent-soft);
+	}
+
+	.locked-amount strong {
+		font-family: var(--font-head);
+		font-size: 20px;
+	}
+
+	.locked-amount small {
+		line-height: 1.4;
+	}
+
+	.modal-form {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.method-section {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.method-options {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(225px, 1fr));
+		gap: 8px;
+	}
+
+	.method-option {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 2px;
+		padding: 11px;
+		border: 2px solid var(--surface-2);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
+		color: var(--text);
+		text-align: left;
+	}
+
+	.method-option-row {
+		display: flex;
+		align-items: stretch;
+		gap: 8px;
+		min-width: 0;
+		padding: 6px;
+		border: 2px solid var(--surface-2);
+		border-radius: var(--radius-sm);
+		background: transparent;
+	}
+
+	.method-option-row .method-option {
+		flex: 1;
+		min-width: 0;
+		border: 0;
+		background: transparent;
+	}
+
+	.method-actions {
+		display: flex;
+		align-items: center;
+	}
+
+	.copy-method,
+	.reveal-method {
+		align-self: center;
+		width: 34px;
+		height: 34px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		box-shadow: none;
+		white-space: nowrap;
+		font-size: 12px;
+	}
+
+	.copy-method:hover,
+	.reveal-method:hover {
+		background: rgba(0, 0, 0, 0.06);
+		box-shadow: none;
+	}
+
+	.method-option-row:hover,
+	.method-option-row.selected {
+		background: transparent;
+	}
+
+	.method-option-row.selected {
+		border-color: #000;
+		background: var(--accent-soft);
+	}
+
+	.method-option span {
+		color: var(--muted);
+		font-size: 12px;
+	}
+
+	.method-option .account-number {
+		display: block;
+		width: 100%;
+		margin-top: 4px;
+		padding: 7px 0;
+		overflow: hidden;
+		border: 0;
+		background: transparent;
+		color: var(--text);
+		font-size: 13px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.modal-actions {
+		display: grid;
+		grid-template-columns: 0.7fr 1.3fr;
+		gap: 10px;
+	}
+
 	@media (max-width: 760px) {
 		.cols {
 			grid-template-columns: 1fr;
+		}
+
+		.modal-backdrop {
+			align-items: flex-end;
+			padding: 0;
+		}
+
+		.payment-modal {
+			width: 100%;
+			max-height: 92dvh;
+			border-bottom: none;
+			border-radius: var(--radius) var(--radius) 0 0;
 		}
 	}
 </style>
