@@ -470,6 +470,9 @@
 	}
 
 	.payable-item .btn {
+		width: auto;
+		padding: 9px 14px;
+		white-space: nowrap;
 		flex-shrink: 0;
 	}
 
