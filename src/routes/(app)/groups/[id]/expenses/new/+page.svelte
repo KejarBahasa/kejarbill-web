@@ -25,8 +25,8 @@
 	let customShares = $state<Record<string, number>>({});
 	let equalShares = $state<Record<string, number>>({});
 	let equalSharesEdited = $state(false);
-	let items = $state<Array<{ name: string; participant_id: string; qty: number; unit_price: number; notes: string }>>([
-		{ name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }
+	let items = $state<Array<{ id: string; name: string; participant_id: string; qty: number; unit_price: number; notes: string }>>([
+		{ id: crypto.randomUUID(), name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }
 	]);
 	let loading = $state(true);
 	let error = $state('');
@@ -101,8 +101,11 @@
 		return p.participant_type === 'guest' ? 'Tamu' : 'Akun terdaftar';
 	}
 
+	const selectedCount = $derived(selectedIds().length);
+	const allParticipantsSelected = $derived(participants.length > 0 && selectedCount === participants.length);
+
 	function addItem() {
-		items = [...items, { name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }];
+		items = [...items, { id: crypto.randomUUID(), name: '', participant_id: '', qty: 1, unit_price: 0, notes: '' }];
 	}
 
 	function removeItem(i: number) {
@@ -200,7 +203,7 @@
 {#if loading}
 	<div class="status"><span class="spinner"></span> Memuat…</div>
 {:else}
-	<form class="card" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+	<form class="card expense-card" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 		{#if error}
 			<div class="alert alert-error" role="alert">
 				<span class="alert-icon"><Icon name="alert" size={17} /></span>
@@ -224,32 +227,35 @@
 			<input class="input" type="text" placeholder="cth: Nasi goreng & es teh" bind:value={description} />
 		</label>
 
-		<label class="field">
-			<span class="field-label">Tanggal & waktu</span>
-			<input class="input" type="datetime-local" step="60" bind:value={expense_date} />
-			<span class="hint muted">Waktu menggunakan zona Asia/Jakarta (UTC+07:00).</span>
-		</label>
+		<div class="compact-fields">
+			<label class="field">
+				<span class="field-label">Tanggal & waktu</span>
+				<input class="input" type="datetime-local" step="60" bind:value={expense_date} />
+				<span class="hint muted">Asia/Jakarta (UTC+07:00).</span>
+			</label>
 
-		<fieldset class="field-group">
-			<span class="field-label">Dibayar oleh</span>
-			<select class="input" bind:value={payer_participant_id}>
-				{#each participants as p (p.id)}
-					<option value={p.id}>{p.display_name}{p.username ? ` (@${p.username})` : p.participant_type === 'guest' ? ' (tamu)' : ''}</option>
-				{/each}
-			</select>
-		</fieldset>
+			<fieldset class="field-group">
+				<span class="field-label">Dibayar oleh</span>
+				<select class="input" bind:value={payer_participant_id}>
+					{#each participants as p (p.id)}
+						<option value={p.id}>{p.display_name}{p.username ? ` (@${p.username})` : p.participant_type === 'guest' ? ' (tamu)' : ''}</option>
+					{/each}
+				</select>
+			</fieldset>
+		</div>
 
 		{#if mode === 'equal'}
-			<label class="field">
+			<label class="field amount-field">
 				<span class="field-label">Total ({currency})</span>
 				<input class="input" type="number" min="0" bind:value={total_amount} oninput={resetEqualShares} />
 			</label>
-			<fieldset class="field-group">
+			<div class="split-layout">
+			<fieldset class="field-group participant-panel">
 				<div class="participant-heading">
 					<span class="field-label">Dibagi ke peserta</span>
 					<div class="participant-actions">
-						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants}>Pilih semua</button>
-						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants}>Kosongkan</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants} disabled={allParticipantsSelected}>Pilih semua</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants} disabled={selectedCount === 0}>Kosongkan</button>
 					</div>
 				</div>
 				<div class="participant-grid">
@@ -261,6 +267,8 @@
 						</label>
 					{/each}
 				</div>
+				</fieldset>
+
 				{#if selectedIds().length > 0}
 					<div class="split-preview">
 						<div class="split-preview-head">
@@ -279,15 +287,24 @@
 						</div>
 					</div>
 				{/if}
-			</fieldset>
+			</div>
 		{:else if mode === 'custom'}
 			<fieldset class="field-group">
 				<div class="participant-heading">
 					<span class="field-label">Peserta & pembagian</span>
 					<div class="participant-actions">
-						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants}>Pilih semua</button>
-						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants}>Kosongkan</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={selectAllParticipants} disabled={allParticipantsSelected}>Pilih semua</button>
+						<button type="button" class="btn btn-ghost btn-mini" onclick={clearParticipants} disabled={selectedCount === 0}>Kosongkan</button>
 					</div>
+				</div>
+				<div class="participant-grid">
+					{#each participants as p (p.id)}
+						<label class="participant-card" class:selected={!!selected[p.id]}>
+							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
+							<span class="participant-copy"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
+							<span class="participant-check"><Icon name="check-circle" size={15} /></span>
+						</label>
+					{/each}
 				</div>
 				<div class="custom-rows">
 					{#each participants as p (p.id)}
@@ -302,21 +319,12 @@
 						{/if}
 					{/each}
 				</div>
-				<div class="participant-grid">
-					{#each participants as p (p.id)}
-						<label class="participant-card" class:selected={!!selected[p.id]}>
-							<input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} />
-							<span class="participant-copy"><strong>{p.display_name}</strong><small>{participantSecondaryText(p)}</small></span>
-							<span class="participant-check"><Icon name="check-circle" size={15} /></span>
-						</label>
-					{/each}
-				</div>
 			</fieldset>
 		{:else}
 			<fieldset class="field-group">
 				<span class="field-label">Item</span>
 				<div class="items">
-					{#each items as item, i (item.name + i)}
+					{#each items as item, i (item.id)}
 						<div class="item-row">
 							<input class="input" type="text" placeholder="Nama item" bind:value={item.name} />
 							<select class="input" bind:value={item.participant_id}>
@@ -369,11 +377,13 @@
 	}
 
 	.card {
-		max-width: 620px;
+		width: 100%;
+		max-width: none;
+		margin-inline: auto;
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
-		padding: 28px;
+		gap: 20px;
+		padding: clamp(24px, 3vw, 36px);
 		background: var(--surface);
 		border: 3px solid #000;
 		box-shadow: var(--shadow);
@@ -401,6 +411,28 @@
 		margin: 0;
 		padding: 0;
 		border: none;
+	}
+
+	.amount-field {
+		max-width: 360px;
+	}
+
+	.compact-fields {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+		gap: 16px;
+	}
+
+	.split-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+		gap: 20px;
+		align-items: start;
+	}
+
+	.participant-panel,
+	.split-preview {
+		min-width: 0;
 	}
 
 	.field-label {
@@ -449,8 +481,17 @@
 	}
 
 	.participant-actions .btn-mini {
+		width: auto;
+		white-space: nowrap;
 		padding: 7px 10px;
 		font-size: 12px;
+	}
+
+	.participant-actions .btn-mini:disabled {
+		box-shadow: none;
+		opacity: 0.45;
+		cursor: not-allowed;
+		transform: none;
 	}
 
 	.participant-grid {
@@ -687,5 +728,51 @@
 
 	.btn-inline {
 		width: auto;
+	}
+
+	@media (max-width: 900px) {
+		.split-layout {
+			grid-template-columns: 1fr;
+		}
+
+		.split-preview {
+			order: 2;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.expense-card {
+			padding: 20px 16px;
+		}
+
+		.compact-fields {
+			grid-template-columns: 1fr;
+		}
+
+		.amount-field {
+			max-width: none;
+		}
+
+		.participant-heading,
+		.split-preview-head {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.participant-actions {
+			width: 100%;
+		}
+
+		.participant-actions .btn {
+			flex: 1;
+		}
+
+		.participant-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.split-preview-head > span {
+			white-space: normal;
+		}
 	}
 </style>
