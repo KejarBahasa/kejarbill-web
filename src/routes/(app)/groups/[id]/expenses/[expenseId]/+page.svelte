@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/Icon.svelte';
 	import { getExpense, deleteExpense } from '$lib/api/expenses';
-import { mapApiError } from '$lib/utils/errors';
+	import { mapApiError } from '$lib/utils/errors';
 	import { formatIDR, formatDate } from '$lib/utils/format';
 	import type { ExpenseDetail } from '$lib/types/expense';
 	import { toast } from '$lib/stores/toast.svelte';
@@ -14,6 +14,19 @@ import { mapApiError } from '$lib/utils/errors';
 	let loading = $state(true);
 	let error = $state('');
 	let deleting = $state(false);
+	let reloading = $state(false);
+
+	async function reloadExpense() {
+		reloading = true;
+		error = '';
+		try {
+			expense = await getExpense(expenseId);
+		} catch (err) {
+			error = mapApiError(err, 'Gagal memuat expense.');
+		} finally {
+			reloading = false;
+		}
+	}
 
 	$effect(() => {
 		(async () => {
@@ -56,14 +69,25 @@ import { mapApiError } from '$lib/utils/errors';
 {#if loading}
 	<div class="status"><span class="spinner"></span> Memuat…</div>
 {:else if error}
-	<div class="alert alert-error" role="alert"><span>{error}</span></div>
+	<div class="alert alert-error" role="alert">
+		<span>{error}</span>
+		{#if error.includes('berubah') || error.includes('sudah berubah')}
+			<button class="btn btn-ghost btn-inline" type="button" onclick={reloadExpense}>Muat ulang</button>
+		{/if}
+	</div>
 {:else if expense}
 	<div class="head">
 		<h1>{expense.title}</h1>
-		<button class="btn btn-ghost btn-inline danger" onclick={handleDelete} disabled={deleting}>
-			<Icon name="trash" size={16} /> Hapus
-		</button>
+		<div class="head-actions">
+			<a class="btn btn-ghost btn-inline" href={`/groups/${page.params.id}/expenses/${expense.id}/edit`}><Icon name="edit" size={16} /> Edit</a>
+			<button class="btn btn-ghost btn-inline danger" onclick={handleDelete} disabled={deleting}>
+				<Icon name="trash" size={16} /> Hapus
+			</button>
+		</div>
 	</div>
+	{#if reloading}
+		<div class="status"><span class="spinner"></span> Memuat data terbaru…</div>
+	{/if}
 
 	<div class="meta">
 		<span class="chip"><Icon name="user" size={13} /> {expense.payer.display_name}</span>
@@ -147,6 +171,11 @@ import { mapApiError } from '$lib/utils/errors';
 		font-family: var(--font-head);
 		font-size: 18px;
 		line-height: 1.4;
+	}
+
+	.head-actions {
+		display: flex;
+		gap: 8px;
 	}
 
 	.btn-inline {

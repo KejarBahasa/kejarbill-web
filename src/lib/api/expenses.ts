@@ -4,7 +4,8 @@ import type {
 	CreateEqualExpenseRequest,
 	CreateItemizedExpenseRequest,
 	ExpenseDetail,
-	ExpenseList
+	ExpenseList,
+	UpdateExpenseRequest
 } from '../types/expense';
 
 export function createEqualExpense(body: CreateEqualExpenseRequest) {
@@ -25,6 +26,10 @@ export function getGroupExpenses(groupId: string, page = 1, limit = 20): Promise
 
 export function getExpense(expenseId: string) {
 	return api<ExpenseDetail>(`/v1/expenses/${expenseId}`, {}, true);
+}
+
+export function updateExpense(expenseId: string, body: UpdateExpenseRequest) {
+	return api<null>(`/v1/expenses/${expenseId}`, { method: 'PATCH', body }, true);
 }
 
 export function deleteExpense(expenseId: string) {
