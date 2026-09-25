@@ -35,9 +35,25 @@ export interface ExpenseItem {
 }
 
 export interface ExpenseDetail extends ExpenseSummary {
+	version: number;
 	participants: ExpenseParticipant[];
 	items: ExpenseItem[];
 }
+
+export interface UpdateExpenseBase {
+	title: string;
+	description?: string;
+	currency: string;
+	expense_date: string;
+	payer_participant_id: string;
+	split_method: 'equal' | 'custom' | 'itemized';
+	version: number;
+}
+
+export type UpdateExpenseRequest =
+	| (UpdateExpenseBase & { split_method: 'equal'; total_amount: number; participant_ids: string[] })
+	| (UpdateExpenseBase & { split_method: 'custom'; participants: CustomExpenseParticipant[] })
+	| (UpdateExpenseBase & { split_method: 'itemized'; items: CreateItemizedExpenseRequest['items'] });
 
 export interface CreateEqualExpenseRequest {
 	participant_ids: string[];
