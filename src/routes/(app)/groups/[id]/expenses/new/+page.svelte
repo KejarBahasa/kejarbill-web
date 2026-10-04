@@ -5,6 +5,7 @@
 	import { createEqualExpense, createCustomExpense, createItemizedExpense } from '$lib/api/expenses';
 	import { mapApiError } from '$lib/utils/errors';
 	import { formatIDR, formatJakartaDateTimeInput, jakartaInputToISO } from '$lib/utils/format';
+	import { discountRequest, validateDiscount } from '$lib/utils/discount';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { Participant } from '$lib/types/group';
 	import { goto } from '$app/navigation';
@@ -17,6 +18,8 @@
 	let title = $state('');
 	let description = $state('');
 	let total_amount = $state(0);
+	let discountType = $state<'amount' | 'percentage' | ''>('');
+	let discountValue = $state(0);
 	let currency = 'IDR';
 	let expense_date = $state(formatJakartaDateTimeInput());
 	let payer_participant_id = $state('');
@@ -150,11 +153,27 @@
 		return items.reduce((sum, item) => sum + itemShare(item, participantId), 0);
 	}
 
+	function customSubtotal() {
+		return Object.entries(customShares)
+			.filter(([pid]) => selected[pid])
+			.reduce((sum, [, share]) => sum + (Number(share) || 0), 0);
+	}
+
+	function itemizedSubtotal() {
+		return items.reduce((sum, item) => sum + itemSubtotal(item), 0);
+	}
+
+	function discountSubtotal() {
+		if (mode === 'equal') return Number(total_amount) || 0;
+		if (mode === 'custom') return customSubtotal();
+		return itemizedSubtotal();
+	}
+
 	function validateCommon(): string {
 		if (title.trim().length < 1) return 'Judul expense wajib diisi.';
 		if (title.trim().length > 150) return 'Judul maksimal 150 karakter.';
 		if (!payer_participant_id) return 'Pilih pembayar (payer).';
-		return '';
+		return validateDiscount({ type: discountType, value: discountValue }, discountSubtotal());
 	}
 
 	async function handleSubmit() {
@@ -194,10 +213,16 @@
 				if (needsExplicitShares) {
 					await createCustomExpense({
 						...common,
-						participants: ids.map((pid) => ({ participant_id: pid, share_amount: equalShareFor(pid) }))
+						participants: ids.map((pid) => ({ participant_id: pid, share_amount: equalShareFor(pid) })),
+						...discountRequest({ type: discountType, value: discountValue })
 					});
 				} else {
-					await createEqualExpense({ ...common, participant_ids: ids, total_amount });
+					await createEqualExpense({
+						...common,
+						participant_ids: ids,
+						subtotal_amount: Number(total_amount),
+						...discountRequest({ type: discountType, value: discountValue })
+					});
 				}
 			} else if (mode === 'custom') {
 				const shares = Object.entries(customShares)
@@ -208,7 +233,11 @@
 					loading = false;
 					return;
 				}
-				await createCustomExpense({ ...common, participants: shares });
+				await createCustomExpense({
+					...common,
+					participants: shares,
+					...discountRequest({ type: discountType, value: discountValue })
+				});
 			} else {
 				if (items.some((it) => !it.name.trim() || it.participant_ids.length < 1 || it.qty <= 0 || it.unit_price <= 0)) {
 					error = 'Lengkapi semua item (nama, minimal satu peserta, qty, harga).';
@@ -217,7 +246,8 @@
 				}
 				await createItemizedExpense({
 					...common,
-					items: items.map((it) => ({ name: it.name.trim(), participant_ids: it.participant_ids, qty: it.qty, unit_price: it.unit_price, notes: it.notes.trim() || undefined }))
+					items: items.map((it) => ({ name: it.name.trim(), participant_ids: it.participant_ids, qty: it.qty, unit_price: it.unit_price, notes: it.notes.trim() || undefined })),
+					...discountRequest({ type: discountType, value: discountValue })
 				});
 			}
 			toast.success('Expense disimpan.');
@@ -282,9 +312,22 @@
 			</fieldset>
 		</div>
 
+		<fieldset class="discount-box">
+			<legend class="field-label">Discount (opsional)</legend>
+			<div class="discount-fields">
+				<select class="input" aria-label="Tipe discount" bind:value={discountType}>
+					<option value="">Tanpa discount</option>
+					<option value="amount">Nominal ({currency})</option>
+					<option value="percentage">Persentase (%)</option>
+				</select>
+				<input class="input" type="number" min="0" step="1" max={discountType === 'percentage' ? 100 : undefined} placeholder="0" aria-label="Nilai discount" bind:value={discountValue} />
+			</div>
+			<span class="hint muted">Discount dibagi proporsional berdasarkan share peserta. Subtotal saat ini: {formatIDR(discountSubtotal())}.</span>
+		</fieldset>
+
 		{#if mode === 'equal'}
 			<label class="field amount-field">
-				<span class="field-label">Total ({currency})</span>
+				<span class="field-label">Subtotal ({currency})</span>
 				<input class="input" type="number" min="0" bind:value={total_amount} oninput={resetEqualShares} />
 			</label>
 			<div class="split-layout">
@@ -409,7 +452,7 @@
 				</button>
 				{#if participants.length > 0}
 					<div class="item-total-preview">
-						<strong>Total beban peserta</strong>
+						<strong>Subtotal beban peserta</strong>
 						{#each participants as p (p.id)}
 							<span>{p.display_name}: <strong>{formatIDR(participantItemTotal(p.id))}</strong></span>
 						{/each}
@@ -483,6 +526,27 @@
 
 	.amount-field {
 		max-width: 360px;
+	}
+
+	.discount-box {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin: 0;
+		padding: 14px;
+		border: 2px solid #000;
+		border-radius: var(--radius-sm);
+		background: var(--surface-2);
+	}
+
+	.discount-box legend {
+		padding: 0 4px;
+	}
+
+	.discount-fields {
+		display: grid;
+		grid-template-columns: minmax(180px, 260px) minmax(120px, 200px);
+		gap: 10px;
 	}
 
 	.compact-fields {
@@ -923,6 +987,10 @@
 
 		.amount-field {
 			max-width: none;
+		}
+
+		.discount-fields {
+			grid-template-columns: 1fr;
 		}
 
 		.participant-heading,

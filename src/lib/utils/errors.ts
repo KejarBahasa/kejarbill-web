@@ -16,6 +16,7 @@ const messages: Record<string, string> = {
 	'settlement not found': 'Settlement tidak ditemukan.',
 	'invalid total amount': 'Total harus habis dibagi jumlah peserta.',
 	'total amount is not evenly divisible among participants': 'Total harus habis dibagi jumlah peserta.',
+	'invalid discount': 'Discount tidak valid. Pastikan nilainya sesuai dengan subtotal dan tipe discount.',
 	'participants required': 'Pilih minimal satu peserta.',
 	'payer not included in participants': 'Pembayar harus termasuk peserta yang dibagi.',
 	'payer participant not found in group': 'Pembayar bukan peserta grup ini.',

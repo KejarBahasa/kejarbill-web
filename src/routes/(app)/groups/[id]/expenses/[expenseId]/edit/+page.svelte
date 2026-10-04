@@ -6,6 +6,7 @@
 	import { getExpense, updateExpense } from '$lib/api/expenses';
 	import { mapApiError } from '$lib/utils/errors';
 	import { formatIDR, formatJakartaDateTimeInput, jakartaInputToISO } from '$lib/utils/format';
+	import { discountRequest, validateDiscount } from '$lib/utils/discount';
 	import { toast } from '$lib/stores/toast.svelte';
 	import type { Participant } from '$lib/types/group';
 	import type { ExpenseDetail, UpdateExpenseRequest } from '$lib/types/expense';
@@ -24,6 +25,8 @@
 	let expense_date = $state('');
 	let payer_participant_id = $state('');
 	let total_amount = $state(0);
+	let discountType = $state<'amount' | 'percentage' | ''>('');
+	let discountValue = $state(0);
 	let selected = $state<Record<string, boolean>>({});
 	let participantOrder = $state<string[]>([]);
 	let customShares = $state<Record<string, number>>({});
@@ -49,9 +52,19 @@
 
 	function isEqualExpense(detail: ExpenseDetail) {
 		if (!detail.participants.length) return false;
-		const base = Math.floor(detail.total_amount / detail.participants.length);
-		const remainder = detail.total_amount % detail.participants.length;
-		return detail.participants.every((p, index) => p.share_amount === base + (index < remainder ? 1 : 0));
+		const count = detail.participants.length;
+		const base = Math.floor(detail.subtotal_amount / count);
+		const remainder = detail.subtotal_amount % count;
+		const preDiscountShares = detail.participants.map((_, index) => base + (index < remainder ? 1 : 0));
+		const allocations = preDiscountShares.map((share) => Math.floor(detail.discount_amount * share / detail.subtotal_amount));
+		let allocated = allocations.reduce((sum, amount) => sum + amount, 0);
+		for (let index = 0; allocated < detail.discount_amount; index = (index + 1) % count) {
+			if ((detail.discount_amount * preDiscountShares[index]) % detail.subtotal_amount > 0) {
+				allocations[index] += 1;
+				allocated += 1;
+			}
+		}
+		return detail.participants.every((p, index) => p.share_amount === preDiscountShares[index] - allocations[index]);
 	}
 
 	function itemSubtotal(item: DraftItem) {
@@ -68,6 +81,18 @@
 
 	function participantItemTotal(participantId: string) {
 		return items.reduce((sum, item) => sum + itemShare(item, participantId), 0);
+	}
+
+	function itemizedSubtotal() {
+		return items.reduce((sum, item) => sum + itemSubtotal(item), 0);
+	}
+
+	function discountSubtotal() {
+		return mode === 'itemized'
+			? itemizedSubtotal()
+			: mode === 'custom'
+				? selectedIds().reduce((sum, id) => sum + (Number(customShares[id]) || 0), 0)
+				: Number(total_amount) || 0;
 	}
 
 	function toggleParticipant(id: string) {
@@ -124,7 +149,9 @@
 				currency = detail.currency;
 				expense_date = formatJakartaDateTimeInput(new Date(detail.expense_date));
 				payer_participant_id = detail.payer.participant_id;
-				total_amount = detail.total_amount;
+				total_amount = detail.subtotal_amount;
+				discountType = detail.discount_type || '';
+				discountValue = detail.discount_value || 0;
 				selected = Object.fromEntries(detail.participants.map((p) => [p.participant_id, true]));
 				customShares = Object.fromEntries(detail.participants.map((p) => [p.participant_id, p.share_amount]));
 				if (detail.items.length > 0) {
@@ -158,7 +185,7 @@
 			if (ids.reduce((sum, id) => sum + Number(customShares[id]), 0) !== total_amount) return `Total pembagian harus sama dengan ${formatIDR(total_amount)}.`;
 		}
 		if (mode === 'itemized' && items.some((item) => !item.name.trim() || item.qty <= 0 || item.unit_price <= 0 || !item.participant_ids.length)) return 'Lengkapi item dan minimal satu peserta per item.';
-		return '';
+		return validateDiscount({ type: discountType, value: discountValue }, discountSubtotal());
 	}
 
 	async function submit() {
@@ -167,9 +194,9 @@
 		saving = true;
 		const base = { title: title.trim(), description: description.trim() || undefined, currency, expense_date: jakartaInputToISO(expense_date), payer_participant_id, version: expense.version };
 		let body: UpdateExpenseRequest;
-		if (mode === 'equal') body = { ...base, split_method: 'equal', total_amount, participant_ids: selectedIds() };
-		else if (mode === 'custom') body = { ...base, split_method: 'custom', participants: selectedIds().map((id) => ({ participant_id: id, share_amount: Number(customShares[id]) })) };
-		else body = { ...base, split_method: 'itemized', items: items.map((item) => ({ name: item.name.trim(), qty: Number(item.qty), unit_price: Number(item.unit_price), notes: item.notes.trim() || undefined, participant_ids: item.participant_ids })) };
+		if (mode === 'equal') body = { ...base, split_method: 'equal', subtotal_amount: Number(total_amount), participant_ids: selectedIds(), ...discountRequest({ type: discountType, value: discountValue }) };
+		else if (mode === 'custom') body = { ...base, split_method: 'custom', participants: selectedIds().map((id) => ({ participant_id: id, share_amount: Number(customShares[id]) })), ...discountRequest({ type: discountType, value: discountValue }) };
+		else body = { ...base, split_method: 'itemized', items: items.map((item) => ({ name: item.name.trim(), qty: Number(item.qty), unit_price: Number(item.unit_price), notes: item.notes.trim() || undefined, participant_ids: item.participant_ids })), ...discountRequest({ type: discountType, value: discountValue }) };
 		try {
 			await updateExpense(expenseId, body);
 			toast.success('Expense berhasil diperbarui.');
@@ -209,9 +236,21 @@
 			<label class="field"><span class="field-label">Tanggal & waktu</span><input class="input" type="datetime-local" step="60" bind:value={expense_date} /></label>
 			<label class="field"><span class="field-label">Dibayar oleh</span><select class="input" bind:value={payer_participant_id}>{#each participants as p (p.id)}<option value={p.id}>{p.display_name}{p.username ? ` (@${p.username})` : ''}</option>{/each}</select></label>
 		</div>
+		<fieldset class="discount-box">
+			<legend class="field-label">Discount (opsional)</legend>
+			<div class="discount-fields">
+				<select class="input" aria-label="Tipe discount" bind:value={discountType}>
+					<option value="">Tanpa discount</option>
+					<option value="amount">Nominal ({currency})</option>
+					<option value="percentage">Persentase (%)</option>
+				</select>
+				<input class="input" type="number" min="0" step="1" max={discountType === 'percentage' ? 100 : undefined} placeholder="0" aria-label="Nilai discount" bind:value={discountValue} />
+			</div>
+			<span class="hint muted">Discount dibagi proporsional berdasarkan share peserta. Subtotal saat ini: {formatIDR(discountSubtotal())}.</span>
+		</fieldset>
 
 		{#if mode !== 'itemized'}
-			<label class="field amount"><span class="field-label">Total ({currency})</span><input class="input" type="number" min="1" bind:value={total_amount} /></label>
+			<label class="field amount"><span class="field-label">Subtotal ({currency})</span><input class="input" type="number" min="1" bind:value={total_amount} /></label>
 			<div class="participant-head"><span class="field-label">Peserta</span><div><button type="button" class="btn btn-ghost mini" onclick={selectAll} disabled={allSelected}>Pilih semua</button><button type="button" class="btn btn-ghost mini" onclick={clearAll} disabled={!selectedCount}>Kosongkan</button></div></div>
 			<div class="participant-grid">{#each participants as p (p.id)}<label class="participant" class:selected={!!selected[p.id]}><input type="checkbox" checked={!!selected[p.id]} onchange={() => toggleParticipant(p.id)} /><span><strong>{p.display_name}</strong><small>{participantText(p)}</small></span></label>{/each}</div>
 			{#if mode === 'equal'}
@@ -228,7 +267,7 @@
 				</div>
 			{/each}</div>
 			<button type="button" class="btn btn-ghost add" onclick={addItem}><Icon name="plus" size={16} /> Tambah item</button>
-			<div class="preview aggregate"><strong>Total beban peserta</strong>{#each participants as p (p.id)}<span>{p.display_name}: {formatIDR(participantItemTotal(p.id))}</span>{/each}</div>
+			<div class="preview aggregate"><strong>Subtotal beban peserta</strong>{#each participants as p (p.id)}<span>{p.display_name}: {formatIDR(participantItemTotal(p.id))}</span>{/each}</div>
 		{/if}
 		<button class="btn btn-primary" type="submit" disabled={saving}>{#if saving}<span class="spinner"></span> Menyimpan…{:else}Simpan perubahan <Icon name="arrow-right" size={17} />{/if}</button>
 	</form>
@@ -243,6 +282,9 @@
 	.field-label { font-size: 13px; font-weight: 700; text-transform: uppercase; }
 	.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 	.amount { max-width: 360px; }
+	.discount-box { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 14px; border: 2px solid #000; border-radius: var(--radius-sm); background: var(--surface-2); }
+	.discount-box legend { padding: 0 4px; }
+	.discount-fields { display: grid; grid-template-columns: minmax(180px, 260px) minmax(120px, 200px); gap: 10px; }
 	.participant-head, .item-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 	.participant-head > div, .item-head > div { display: flex; gap: 6px; }
 	.mini { width: auto; padding: 7px 10px; font-size: 12px; }
@@ -265,5 +307,5 @@
 	.reload { width: auto; }
 	.aggregate { margin-top: 2px; }
 	.status { display: flex; gap: 10px; color: var(--muted); }
-	@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } .amount { max-width: none; } .item-top { grid-template-columns: 1fr auto; } .item-top .qty { grid-column: 1; } .item-top > .input:nth-child(3) { grid-column: 2; grid-row: 2; } .item-top strong { grid-column: 1; grid-row: 3; } .item-top .icon-btn { grid-column: 2; grid-row: 3; } .participant-head, .item-head { align-items: flex-start; flex-direction: column; } }
+	@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } .amount { max-width: none; } .discount-fields { grid-template-columns: 1fr; } .item-top { grid-template-columns: 1fr auto; } .item-top .qty { grid-column: 1; } .item-top > .input:nth-child(3) { grid-column: 2; grid-row: 2; } .item-top strong { grid-column: 1; grid-row: 3; } .item-top .icon-btn { grid-column: 2; grid-row: 3; } .participant-head, .item-head { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -13,6 +13,13 @@ export interface ExpenseSummary {
 	payer: ExpensePayer;
 }
 
+export type DiscountType = 'amount' | 'percentage';
+
+export interface ExpenseDiscountRequest {
+	discount_type: DiscountType | '';
+	discount_value: number;
+}
+
 export interface ExpenseParticipant {
 	participant_id: string;
 	display_name: string;
@@ -36,6 +43,10 @@ export interface ExpenseItem {
 
 export interface ExpenseDetail extends ExpenseSummary {
 	version: number;
+	subtotal_amount: number;
+	discount_type: DiscountType;
+	discount_value: number;
+	discount_amount: number;
 	participants: ExpenseParticipant[];
 	items: ExpenseItem[];
 }
@@ -51,9 +62,9 @@ export interface UpdateExpenseBase {
 }
 
 export type UpdateExpenseRequest =
-	| (UpdateExpenseBase & { split_method: 'equal'; total_amount: number; participant_ids: string[] })
-	| (UpdateExpenseBase & { split_method: 'custom'; participants: CustomExpenseParticipant[] })
-	| (UpdateExpenseBase & { split_method: 'itemized'; items: CreateItemizedExpenseRequest['items'] });
+	| (UpdateExpenseBase & ExpenseDiscountRequest & { split_method: 'equal'; subtotal_amount: number; total_amount?: number; participant_ids: string[] })
+	| (UpdateExpenseBase & ExpenseDiscountRequest & { split_method: 'custom'; participants: CustomExpenseParticipant[] })
+	| (UpdateExpenseBase & ExpenseDiscountRequest & { split_method: 'itemized'; items: CreateItemizedExpenseRequest['items'] });
 
 export interface CreateEqualExpenseRequest {
 	participant_ids: string[];
@@ -63,7 +74,10 @@ export interface CreateEqualExpenseRequest {
 	payer_participant_id: string;
 	currency: string;
 	expense_date: string;
-	total_amount: number;
+	subtotal_amount: number;
+	total_amount?: number;
+	discount_type: DiscountType | '';
+	discount_value: number;
 }
 
 export interface CustomExpenseParticipant {
@@ -79,6 +93,8 @@ export interface CreateCustomExpenseRequest {
 	expense_date: string;
 	payer_participant_id: string;
 	participants: CustomExpenseParticipant[];
+	discount_type: DiscountType | '';
+	discount_value: number;
 }
 
 export interface CreateItemizedExpenseRequest {
@@ -95,6 +111,8 @@ export interface CreateItemizedExpenseRequest {
 		qty: number;
 		unit_price: number;
 	}>;
+	discount_type: DiscountType | '';
+	discount_value: number;
 }
 
 export interface ExpenseList {

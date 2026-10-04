@@ -100,6 +100,21 @@
 	{/if}
 
 	<div class="grid">
+		<section class="block discount-summary">
+			<h2>Ringkasan biaya</h2>
+			<ul class="rows">
+				<li><span>Subtotal</span><strong>{formatIDR(expense.subtotal_amount)}</strong></li>
+				<li>
+					<span>Discount</span>
+					<strong>{expense.discount_amount > 0 ? `-${formatIDR(expense.discount_amount)}` : formatIDR(0)}</strong>
+				</li>
+				{#if expense.discount_amount > 0}
+					<li><span>{expense.discount_type === 'percentage' ? `Discount (${expense.discount_value}%)` : 'Discount nominal'}</span><strong>{expense.discount_type === 'percentage' ? `${expense.discount_value}%` : formatIDR(expense.discount_value)}</strong></li>
+				{/if}
+				<li class="final-total"><span>Total akhir</span><strong>{formatIDR(expense.total_amount)}</strong></li>
+			</ul>
+		</section>
+
 		<section class="block">
 			<h2>Pembagian ({expense.participants.length})</h2>
 			<ul class="rows">
@@ -121,11 +136,9 @@
 							<span class="item-detail">
 								<span>{it.qty}× {it.name} <em>({formatIDR(it.unit_price)})</em></span>
 								<small>
-									{#if it.participants.length === 1}
-										{it.participants[0].display_name}
-									{:else}
-										Bersama: {it.participants.map((p) => p.display_name).join(', ')}
-									{/if}
+									{#each it.participants as participant, index (participant.participant_id)}
+										{#if index > 0}<br />{/if}{participant.display_name}: {formatIDR(participant.share_amount)}
+									{/each}
 								</small>
 							</span>
 							<strong>{formatIDR(it.subtotal)}</strong>
@@ -253,6 +266,12 @@
 	.rows li:last-child {
 		border-bottom: none;
 		padding-bottom: 0;
+	}
+
+	.final-total {
+		padding-top: 10px;
+		border-top: 3px solid #000;
+		font-weight: 800;
 	}
 
 	.rows em {
